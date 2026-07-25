@@ -1,298 +1,289 @@
+import io
+import re
 import streamlit as st
+from pypdf import PdfReader
 import pdfplumber
-from weasyprint import HTML
-import tempfile
+from fpdf import FPDF
 
-st.set_page_config(page_title="Kartu Manual Persediaan", page_icon="📦", layout="centered")
+class KartuPDF(FPDF):
+    def __init__(self):
+        super().__init__(orientation='P', unit='mm', format='A4')
+        self.set_auto_page_break(auto=False)
+        self.set_margins(8, 10, 8)
 
-st.title("📦 Konverter Kartu Manual Persediaan")
-st.write("Filter mutasi 0 otomatis dibuang & baris kosong bersih tanpa teks 'Baik' nempel!")
+    def generate_page(self, nama_barang, kode_barang, satuan, rows_data):
+        self.add_page()
+        
+        # --- HEADER ---
+        self.set_font("Arial", 'B', 10)
+        self.cell(0, 4, "KARTU MANUAL PERSEDIAAN", ln=True, align='C')
+        self.cell(0, 4, "KANTOR IMIGRASI KELAS II TPI KUALA TUNGKAL", ln=True, align='C')
+        self.ln(3)
 
-uploaded_file = st.file_uploader("Upload File PDF Mentah Lu Di Sini", type=["pdf"])
+        # --- META INFO ---
+        self.set_font("Arial", '', 8.5)
+        self.cell(28, 4, "Nama Barang", ln=False)
+        self.cell(4, 4, ":", ln=False)
+        self.cell(0, 4, str(nama_barang), ln=True)
+
+        self.cell(28, 4, "Kode Barang", ln=False)
+        self.cell(4, 4, ":", ln=False)
+        self.cell(0, 4, str(kode_barang), ln=True)
+
+        self.cell(28, 4, "Satuan", ln=False)
+        self.cell(4, 4, ":", ln=False)
+        self.cell(0, 4, str(satuan), ln=True)
+        self.ln(3)
+
+        # --- TABEL HEADER ---
+        col_w = [8, 20, 38, 14, 18, 14, 18, 14, 34, 16] 
+        
+        self.set_font("Arial", '', 7.5)
+        
+        x_start = self.get_x()
+        y_start = self.get_y()
+
+        self.cell(col_w[0], 12, "No", border=1, align='C')
+        self.cell(col_w[1], 12, "Tanggal", border=1, align='C')
+        self.cell(col_w[2], 12, "Keterangan", border=1, align='C')
+        self.cell(col_w[3], 12, "Jml Masuk", border=1, align='C')
+        self.cell(col_w[4], 12, "Hrg Satuan", border=1, align='C')
+        self.cell(col_w[5], 12, "Jml Keluar", border=1, align='C')
+        self.cell(col_w[6], 12, "Hrg Satuan", border=1, align='C')
+        
+        x_saldo = self.get_x()
+        self.cell(col_w[7] + col_w[8], 6, "Saldo", border=1, align='C')
+        self.cell(col_w[9], 12, "Kondisi", border=1, align='C')
+        
+        self.set_xy(x_saldo, y_start + 6)
+        self.cell(col_w[7], 6, "Jumlah", border=1, align='C')
+        self.cell(col_w[8], 6, "Nilai (Rp)", border=1, align='C')
+
+        self.set_xy(x_start, y_start + 12)
+
+        for i, w in enumerate(col_w):
+            self.cell(w, 4, f"({i+1})", border=1, align='C')
+        self.ln(4)
+
+        # --- BODY TABEL ---
+        self.set_font("Arial", '', 7)
+        for row in rows_data:
+            for i, val in enumerate(row):
+                align_code = 'C'
+                if i in [2]: 
+                    align_code = 'L'
+                elif i in [3, 4, 5, 6, 7, 8]: 
+                    align_code = 'R'
+
+                self.cell(col_w[i], 4.5, str(val), border=1, align=align_code)
+            self.ln(4.5)
+
+
+st.set_page_config(page_title="Kartu Manual Persediaan", page_icon="⚡", layout="centered")
+
+st.title("⚡ Konverter Kartu Manual Persediaan (Grouped)")
+st.write("Menggabungkan transaksi barang yang terpecah menjadi 1 halaman ringkas!")
+
+uploaded_file = st.file_uploader("Upload File PDF Mentah Di Sini", type=["pdf"])
 
 if uploaded_file is not None:
     st.success("File berhasil di-upload, bro!")
     
-    if st.button("🚀 PROSES & BERSIHKAN PDF"):
-        with st.spinner("Lagi memproses & memfilter barang aktif... Tunggu sebentar ya!"):
+    if st.button("🚀 PROSES & GABUNGKAN HALAMAN"):
+        with st.spinner("Sedang memproses & menggabungkan barang..."):
             
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
-                tmp_file.write(uploaded_file.read())
-                tmp_path = tmp_file.name
+            pdf_bytes = uploaded_file.read()
+            pdf_plumber_obj = pdfplumber.open(io.BytesIO(pdf_bytes))
+            reader = PdfReader(io.BytesIO(pdf_bytes))
 
-            html_template = """
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <style>
-                    @page { 
-                        size: A4 portrait; 
-                        margin: 10mm 8mm; 
-                    }
-                    * {
-                        box-sizing: border-box;
-                    }
-                    body { 
-                        font-family: Arial, Helvetica, sans-serif; 
-                        font-size: 8pt; 
-                        color: #000;
-                        margin: 0;
-                        padding: 0;
-                    }
-                    .page { 
-                        page-break-after: always; 
-                    }
-                    .page:last-child { 
-                        page-break-after: avoid; 
-                    }
-                    
-                    /* Title Style */
-                    .header-title { 
-                        text-align: center; 
-                        font-size: 10pt; 
-                        font-weight: bold; 
-                        color: #000;
-                        margin-bottom: 12px; 
-                        line-height: 1.3;
-                    }
-                    
-                    /* Meta Info */
-                    .meta-info {
-                        margin-bottom: 10px;
-                        font-size: 8.5pt;
-                        line-height: 1.4;
-                    }
-                    .meta-table {
-                        border-collapse: collapse;
-                    }
-                    .meta-table td {
-                        border: none;
-                        padding: 1px 0;
-                        vertical-align: top;
-                    }
-                    
-                    /* Main Table Style */
-                    table.main-table { 
-                        width: 100%; 
-                        border-collapse: collapse; 
-                        table-layout: fixed;
-                    }
-                    table.main-table th, table.main-table td { 
-                        border: 1px solid #000; 
-                        padding: 4px 2px; 
-                        text-align: center; 
-                        word-wrap: break-word;
-                        vertical-align: middle;
-                        font-size: 7.5pt;
-                    }
-                    table.main-table th { 
-                        font-weight: normal; 
-                        background-color: #ffffff; 
-                        font-size: 8pt;
-                    }
-                </style>
-            </head>
-            <body>
-            """
-            
-            halaman_lolos = 0
-            
-            with pdfplumber.open(tmp_path) as pdf:
-                for page in pdf.pages:
-                    text = page.extract_text() or ""
-                    
-                    # FILTER 1: Harus ada indikasi kata transaksi
-                    if "Pembelian" in text or "Habis Pakai" in text or "Saldo Awal" in text:
-                        
-                        # Extract Header Data
-                        nama_barang = "-"
-                        kode_barang = "-"
-                        satuan = "-"
-                        
-                        lines = text.split("\n")
-                        for line in lines:
-                            if "NAMA BARANG" in line.upper() or "NAMA" in line.upper():
-                                if ":" in line:
-                                    nama_barang = line.split(":")[-1].strip()
-                            if "KODE BARANG" in line.upper() or "KODE" in line.upper():
-                                if ":" in line:
-                                    kode_barang = line.split(":")[-1].strip()
-                            if "SATUAN" in line.upper():
-                                if ":" in line:
-                                    satuan = line.split(":")[-1].strip()
+            # Dictionary untuk menampung data per Kode Barang
+            # Format: { kode_barang: { 'nama': ..., 'satuan': ..., 'rows': [...] } }
+            grouped_data = {}
 
-                        # Extract Table Data
-                        tables = page.extract_tables()
-                        rows_html = ""
-                        no_counter = 1
-                        ada_transaksi_nyata = False
-                        
-                        if tables:
-                            for table in tables:
-                                row_idx = 0
-                                while row_idx < len(table):
-                                    row = table[row_idx]
-                                    row_idx += 1
-                                    
-                                    if not any(row):
-                                        continue
-                                        
-                                    clean_row = [str(cell).replace('\n', ' ').strip() if cell else '' for cell in row]
-                                    row_str = " ".join(clean_row).lower()
-                                    
-                                    # Skip header bawaan PDF
-                                    if "no" in clean_row[0].lower() or "tanggal" in row_str or "keterangan" in row_str or "satuan" in row_str or "unit" in row_str:
-                                        continue
-                                    
-                                    # Skip baris saldo penutup bawaan
-                                    if clean_row[0].strip().lower() == "saldo":
-                                        continue
-                                        
-                                    ket = clean_row[2] if len(clean_row) > 2 else ""
-                                    tgl = clean_row[1] if len(clean_row) > 1 else ""
-                                    
-                                    if ket or tgl:
-                                        m_jml = clean_row[4] if len(clean_row) > 4 else ""
-                                        m_hrg = clean_row[5] if len(clean_row) > 5 else ""
-                                        
-                                        k_jml = clean_row[7] if len(clean_row) > 7 else ""
-                                        k_hrg = clean_row[8] if len(clean_row) > 8 else ""
-                                        
-                                        s_jml = clean_row[10] if len(clean_row) > 10 else ""
-                                        s_rp = clean_row[11] if len(clean_row) > 11 else ""
-                                        
-                                        # Intip baris saldo di bawah jika ada
-                                        if row_idx < len(table):
-                                            next_row = [str(cell).replace('\n', ' ').strip() if cell else '' for cell in table[row_idx]]
-                                            if next_row[0].strip().lower() == "saldo":
-                                                if len(next_row) > 11 and next_row[11]:
-                                                    s_rp = next_row[11]
-                                                row_idx += 1
-                                        
-                                        # Format Saldo Awal
-                                        if "saldo awal" in ket.lower():
-                                            m_hrg = ""
-                                            k_jml = ""
-                                            k_hrg = ""
-
-                                        # FILTER 2: Cek apakah benar-benar ada transaksi/saldo aktif
-                                        # Jika Saldo Awal tapi s_jml == 0 dan s_rp == 0, abaikan sebagai barang kosong!
-                                        clean_s_jml = s_jml.replace(',', '').replace('.', '').strip()
-                                        clean_m_jml = m_jml.replace(',', '').replace('.', '').strip()
-                                        clean_k_jml = k_jml.replace(',', '').replace('.', '').strip()
-                                        
-                                        if "saldo awal" in ket.lower() and (clean_s_jml == "0" or clean_s_jml == "") and (clean_m_jml == "0" or clean_m_jml == ""):
-                                            continue # Abaikan transaksi kosong ini
-
-                                        # Mark bahwa barang ini punya transaksi bernilai
-                                        ada_transaksi_nyata = True
-
-                                        rows_html += f"""
-                                        <tr>
-                                            <td style="width: 4%;">{no_counter}</td>
-                                            <td style="width: 11%;">{tgl}</td>
-                                            <td style="width: 20%;">{ket}</td>
-                                            <td style="width: 7%;">{m_jml}</td>
-                                            <td style="width: 9%;">{m_hrg}</td>
-                                            <td style="width: 7%;">{k_jml}</td>
-                                            <td style="width: 9%;">{k_hrg}</td>
-                                            <td style="width: 7%;">{s_jml}</td>
-                                            <td style="width: 18%;">{s_rp}</td>
-                                            <td style="width: 8%;">Baik</td>
-                                        </tr>
-                                        """
-                                        no_counter += 1
-
-                        # Jika barang tidak punya transaksi nyata (misal CAT AVITEX saldo 0), LOMPATIN!
-                        if not ada_transaksi_nyata:
-                            continue
-
-                        # MINIMAL 24 BARIS PER BARANG (Baris kosong TANPA kata 'Baik')
-                        while no_counter <= 24:
-                            rows_html += f"""
-                            <tr>
-                                <td style="width: 4%;">{no_counter}</td>
-                                <td style="width: 11%;"></td>
-                                <td style="width: 20%;"></td>
-                                <td style="width: 7%;"></td>
-                                <td style="width: 9%;"></td>
-                                <td style="width: 7%;"></td>
-                                <td style="width: 9%;"></td>
-                                <td style="width: 7%;"></td>
-                                <td style="width: 18%;"></td>
-                                <td style="width: 8%;"></td>
-                            </tr>
-                            """
-                            no_counter += 1
-
-                        html_template += f"""
-                        <div class="page">
-                            <div class="header-title">
-                                KARTU MANUAL PERSEDIAAN<br>
-                                KANTOR IMIGRASI KELAS II TPI KUALA TUNGKAL
-                            </div>
-                            
-                            <div class="meta-info">
-                                <table class="meta-table">
-                                    <tr><td style="width: 110px;">Nama Barang</td><td style="width: 15px;">:</td><td>{nama_barang}</td></tr>
-                                    <tr><td>Kode Barang</td><td>:</td><td>{kode_barang}</td></tr>
-                                    <tr><td>Satuan</td><td>:</td><td>{satuan}</td></tr>
-                                </table>
-                            </div>
-                            
-                            <table class="main-table">
-                                <thead>
-                                    <tr>
-                                        <th rowspan="2" style="width: 4%;">No</th>
-                                        <th rowspan="2" style="width: 11%;">Tanggal</th>
-                                        <th rowspan="2" style="width: 20%;">Keterangan</th>
-                                        <th rowspan="2" style="width: 7%;">Jumlah Masuk</th>
-                                        <th rowspan="2" style="width: 9%;">Harga Satuan</th>
-                                        <th rowspan="2" style="width: 7%;">Jumlah Keluar</th>
-                                        <th rowspan="2" style="width: 9%;">Harga Satuan</th>
-                                        <th colspan="2" style="width: 25%;">Saldo</th>
-                                        <th rowspan="2" style="width: 8%;">Kondisi Barang</th>
-                                    </tr>
-                                    <tr>
-                                        <th style="width: 7%;">Jumlah</th>
-                                        <th style="width: 18%;">Nilai (Rp)</th>
-                                    </tr>
-                                    <tr>
-                                        <th>(1)</th>
-                                        <th>(2)</th>
-                                        <th>(3)</th>
-                                        <th>(4)</th>
-                                        <th>(5)</th>
-                                        <th>(6)</th>
-                                        <th>(7)</th>
-                                        <th>(8)</th>
-                                        <th>(9)</th>
-                                        <th>(10)</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {rows_html}
-                                </tbody>
-                            </table>
-                        </div>
-                        """
-                        halaman_lolos += 1
-            
-            html_template += "</body></html>"
-            
-            pdf_out_path = "Kartu_Manual_Persediaan_Sempurna.pdf"
-            HTML(string=html_template).write_pdf(pdf_out_path)
-            
-            if halaman_lolos > 0:
-                st.balloons()
-                st.success(f"Selesai! Berhasil memproses {halaman_lolos} barang aktif ke format rapi!")
+            for idx, page in enumerate(reader.pages):
+                text = page.extract_text() or ""
                 
-                with open(pdf_out_path, "rb") as f:
-                    st.download_button(
-                        label="📥 DOWNLOAD PDF PERFECT RESULT",
-                        data=f,
-                        file_name="Kartu_Manual_Persediaan_Perfect.pdf",
-                        mime="application/pdf"
-                    )
+                # Cek jika halaman memiliki transaksi
+                if any(k in text for k in ["Pembelian", "Habis Pakai", "Saldo Awal", "Reklasifikasi"]):
+                    
+                    nama_barang = "-"
+                    kode_barang = "-"
+                    satuan = "-"
+                    
+                    # 1. Ekstrak Header via pdfplumber top-crop
+                    try:
+                        plumber_page = pdf_plumber_obj.pages[idx]
+                        top_text = plumber_page.crop((0, 0, plumber_page.width, 200)).extract_text() or ""
+                        
+                        for line in top_text.split("\n"):
+                            line_clean = line.strip()
+                            if ":" in line_clean:
+                                parts = line_clean.split(":", 1)
+                                label = parts[0].upper()
+                                val = parts[1].strip()
+                                
+                                if "NAMA" in label and "BARANG" in label:
+                                    nama_barang = val
+                                elif "KODE" in label and "BARANG" in label:
+                                    kode_barang = val
+                                elif "SATUAN" in label:
+                                    satuan = re.sub(r'SATUAN$', '', val, flags=re.IGNORECASE).strip()
+                    except Exception:
+                        pass
+
+                    # Fallback Regex Header
+                    if nama_barang == "-":
+                        m = re.search(r'Nama\s*Barang\s*:\s*(.+)', text, re.IGNORECASE)
+                        if m: nama_barang = m.group(1).split("Kode")[0].strip()
+                        
+                    if kode_barang == "-":
+                        m = re.search(r'Kode\s*Barang\s*:\s*([\d\.]+)', text, re.IGNORECASE)
+                        if m: kode_barang = m.group(1).strip()
+                        
+                    if satuan == "-":
+                        m = re.search(r'Satuan\s*:\s*([A-Za-z0-9]+)', text, re.IGNORECASE)
+                        if m: satuan = m.group(1).strip()
+
+                    if kode_barang == "-":
+                        continue # Abaikan jika kode barang tidak terdeteksi
+
+                    # Inisialisasi dictionary untuk kode barang ini jika belum ada
+                    if kode_barang not in grouped_data:
+                        grouped_data[kode_barang] = {
+                            'nama': nama_barang,
+                            'satuan': satuan,
+                            'rows': []
+                        }
+
+                    lines = [l.strip() for l in text.split("\n") if l.strip()]
+
+                    for line in lines:
+                        line_lower = line.lower()
+                        
+                        if any(k in line_lower for k in ["kantor imigrasi", "kartu manual", "nama barang", "kode barang", "halaman", "kondisi barang", "jumlah masuk"]):
+                            continue
+                            
+                        # Deteksi Kata Kunci Transaksi
+                        if any(k in line_lower for k in ["saldo awal", "pembelian", "habis pakai", "reklasifikasi"]):
+                            
+                            ket = ""
+                            if "saldo awal" in line_lower:
+                                ket = "Saldo Awal"
+                            elif "pembelian" in line_lower:
+                                ket = "Pembelian"
+                            elif "habis pakai" in line_lower:
+                                ket = "Habis Pakai"
+                            elif "reklasifikasi" in line_lower:
+                                ket = "Reklasifikasi Masuk" if "masuk" in line_lower else "Reklasifikasi"
+                            
+                            # Cari tanggal
+                            tgl = ""
+                            tgl_match = re.search(r'\d{2}/\d{2}/\d{4}|\d{2}-\d{2}-\d{4}', line)
+                            if tgl_match:
+                                tgl = tgl_match.group(0)
+
+                            # Ambil semua deretan angka
+                            numbers = re.findall(r'[\d\.\,]+', line)
+                            
+                            # Filter jika angka "2811323..." ikut kegabung
+                            clean_numbers = []
+                            for num in numbers:
+                                # Jika angka terlalu panjang tanpa pemisah desimal/ribuan, kemungkinan teks gabungan
+                                if len(num) > 10 and '.' not in num and ',' not in num:
+                                    continue
+                                clean_numbers.append(num)
+
+                            m_jml = m_hrg = k_jml = k_hrg = s_jml = s_rp = ""
+
+                            if "saldo awal" in line_lower:
+                                if len(clean_numbers) >= 2:
+                                    s_jml = clean_numbers[-2]
+                                    s_rp = clean_numbers[-1]
+                                elif len(clean_numbers) == 1:
+                                    s_jml = clean_numbers[0]
+                                
+                                clean_s_jml = s_jml.replace(',', '').replace('.', '').strip()
+                                if clean_s_jml in ["0", ""]:
+                                    continue # Skip saldo awal 0
+                            else:
+                                if "pembelian" in line_lower or "reklasifikasi" in line_lower:
+                                    if len(clean_numbers) >= 4:
+                                        m_jml = clean_numbers[0]
+                                        m_hrg = clean_numbers[1]
+                                        s_jml = clean_numbers[-2]
+                                        s_rp = clean_numbers[-1]
+                                elif "habis pakai" in line_lower:
+                                    if len(clean_numbers) >= 4:
+                                        k_jml = clean_numbers[0]
+                                        k_hrg = clean_numbers[1]
+                                        s_jml = clean_numbers[-2]
+                                        s_rp = clean_numbers[-1]
+
+                            # Tambahkan transaksi ke grup barang ini
+                            grouped_data[kode_barang]['rows'].append({
+                                'tgl': tgl,
+                                'ket': ket,
+                                'm_jml': m_jml,
+                                'm_hrg': m_hrg,
+                                'k_jml': k_jml,
+                                'k_hrg': k_hrg,
+                                's_jml': s_jml,
+                                's_rp': s_rp
+                            })
+
+            pdf_plumber_obj.close()
+
+            # --- GENERATE PDF HASIL GABUNGAN ---
+            pdf_out = KartuPDF()
+            halaman_lolos = 0
+
+            for kode_barang, info in grouped_data.items():
+                raw_rows = info['rows']
+                
+                if not raw_rows:
+                    continue
+
+                # Pagination: pecah tiap 24 baris per halaman jika transaksinya > 24
+                chunk_size = 24
+                for i in range(0, len(raw_rows), chunk_size):
+                    chunk = raw_rows[i:i + chunk_size]
+                    
+                    rows_table = []
+                    no_counter = 1
+                    
+                    for r in chunk:
+                        rows_table.append([
+                            no_counter,
+                            r['tgl'],
+                            r['ket'],
+                            r['m_jml'],
+                            r['m_hrg'],
+                            r['k_jml'],
+                            r['k_hrg'],
+                            r['s_jml'],
+                            r['s_rp'],
+                            "Baik"
+                        ])
+                        no_counter += 1
+
+                    # Pad baris kosong sampai 24
+                    while no_counter <= 24:
+                        rows_table.append([no_counter, "", "", "", "", "", "", "", "", ""])
+                        no_counter += 1
+
+                    pdf_out.generate_page(info['nama'], kode_barang, info['satuan'], rows_table)
+                    halaman_lolos += 1
+
+            if halaman_lolos > 0:
+                pdf_bytes_output = pdf_out.output()
+                st.balloons()
+                st.success(f"Selesai! Berhasil menggabungkan transaksi menjadi {halaman_lolos} halaman efisien!")
+                
+                st.download_button(
+                    label="📥 DOWNLOAD PDF PERFECT MERGED RESULT",
+                    data=bytes(pdf_bytes_output),
+                    file_name="Kartu_Manual_Persediaan_Merged.pdf",
+                    mime="application/pdf"
+                )
             else:
                 st.error("Nggak ada transaksi bernilai yang ditemukan di file PDF ini, bro.")
