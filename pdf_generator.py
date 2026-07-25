@@ -8,12 +8,12 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 def build_pdf(pages_data):
     buffer = io.BytesIO()
     
-    # Margin kanan-kiri diperkecil ke 15 point biar tabel muat leluasa
+    # Margin diperlebar dikit biar serangga layout gak numpuk
     doc = SimpleDocTemplate(
         buffer,
         pagesize=A4,
-        rightMargin=15,
-        leftMargin=15,
+        rightMargin=20,
+        leftMargin=20,
         topMargin=20,
         bottomMargin=20
     )
@@ -55,17 +55,17 @@ def build_pdf(pages_data):
     story = []
 
     for idx, item in enumerate(pages_data):
-        # Header
+        # Header Laporan
         story.append(Paragraph("KARTU MANUAL PERSEDIAAN<br/>KANTOR IMIGRASI KELAS II TPI KUALA TUNGKAL", title_style))
         story.append(Spacer(1, 8))
 
-        # Meta Table
+        # Tabel Informasi Meta
         meta_data = [
             [Paragraph("Nama Barang", meta_style), Paragraph(":", meta_style), Paragraph(item['nama_barang'], meta_style)],
             [Paragraph("Kode Barang", meta_style), Paragraph(":", meta_style), Paragraph(item['kode_barang'], meta_style)],
             [Paragraph("Satuan", meta_style), Paragraph(":", meta_style), Paragraph(item['satuan'], meta_style)]
         ]
-        meta_table = Table(meta_data, colWidths=[75, 10, 480])
+        meta_table = Table(meta_data, colWidths=[75, 10, 455])
         meta_table.setStyle(TableStyle([
             ('VALIGN', (0,0), (-1,-1), 'TOP'),
             ('PADDING', (0,0), (-1,-1), 0),
@@ -74,7 +74,7 @@ def build_pdf(pages_data):
         story.append(meta_table)
         story.append(Spacer(1, 6))
 
-        # Main Table Header
+        # Header Tabel Utama
         table_data = [
             [
                 Paragraph("No", cell_bold), Paragraph("Tanggal", cell_bold), Paragraph("Keterangan", cell_bold),
@@ -94,7 +94,7 @@ def build_pdf(pages_data):
             ]
         ]
 
-        # Rows
+        # Isi Baris Transaksi
         no_counter = 1
         for r in item["rows"]:
             table_data.append([
@@ -106,25 +106,30 @@ def build_pdf(pages_data):
             ])
             no_counter += 1
 
-        # Fill up to 24 rows
+        # Pad sampai 24 baris
         while no_counter <= 24:
             table_data.append([
                 Paragraph(str(no_counter), cell_style), "", "", "", "", "", "", "", "", ""
             ])
             no_counter += 1
 
-        # Total Lebar = 565 pt (Pas persis di area A4)
-        col_widths = [20, 52, 115, 38, 48, 38, 48, 38, 120, 48]
+        # KUNCI UTAMA: Total Lebar = 540 pt (Sangat aman dari batas 555 pt A4)
+        col_widths = [20, 50, 110, 36, 46, 36, 46, 36, 115, 45]
+        
         main_table = Table(table_data, colWidths=col_widths, repeatRows=3)
 
         t_style = [
             ('GRID', (0,0), (-1,-1), 0.5, colors.black),
             ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
             ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+            
+            # Nol-kan padding sel bawaan biar gak makan ukuran otomatis
+            ('LEFTPADDING', (0,0), (-1,-1), 0),
+            ('RIGHTPADDING', (0,0), (-1,-1), 0),
             ('TOPPADDING', (0,0), (-1,-1), 1),
             ('BOTTOMPADDING', (0,0), (-1,-1), 1),
-            ('LEFTPADDING', (0,0), (-1,-1), 0.5),
-            ('RIGHTPADDING', (0,0), (-1,-1), 0.5),
+            
+            # Span Header
             ('SPAN', (0,0), (0,1)),
             ('SPAN', (1,0), (1,1)),
             ('SPAN', (2,0), (2,1)),
