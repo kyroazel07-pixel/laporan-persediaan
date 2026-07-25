@@ -1,7 +1,7 @@
+import io
 import streamlit as st
 import pdfplumber
 from weasyprint import HTML
-import tempfile
 
 st.set_page_config(page_title="Kartu Manual Persediaan", page_icon="📦", layout="centered")
 
@@ -16,88 +16,87 @@ if uploaded_file is not None:
     if st.button("🚀 PROSES & BERSIHKAN PDF"):
         with st.spinner("Lagi memproses & memfilter barang aktif... Tunggu sebentar ya!"):
             
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
-                tmp_file.write(uploaded_file.read())
-                tmp_path = tmp_file.name
+            # 1. Buka Stream Langsung dari Memori (Super Fast, Tanpa Temp File)
+            bytes_data = uploaded_file.read()
+            pdf_file = io.BytesIO(bytes_data)
 
-            html_template = """
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <style>
-                    @page { 
-                        size: A4 portrait; 
-                        margin: 10mm 8mm; 
-                    }
-                    * {
-                        box-sizing: border-box;
-                    }
-                    body { 
-                        font-family: Arial, Helvetica, sans-serif; 
-                        font-size: 8pt; 
-                        color: #000;
-                        margin: 0;
-                        padding: 0;
-                    }
-                    .page { 
-                        page-break-after: always; 
-                    }
-                    .page:last-child { 
-                        page-break-after: avoid; 
-                    }
-                    
-                    /* Title Style */
-                    .header-title { 
-                        text-align: center; 
-                        font-size: 10pt; 
-                        font-weight: bold; 
-                        color: #000;
-                        margin-bottom: 12px; 
-                        line-height: 1.3;
-                    }
-                    
-                    /* Meta Info */
-                    .meta-info {
-                        margin-bottom: 10px;
-                        font-size: 8.5pt;
-                        line-height: 1.4;
-                    }
-                    .meta-table {
-                        border-collapse: collapse;
-                    }
-                    .meta-table td {
-                        border: none;
-                        padding: 1px 0;
-                        vertical-align: top;
-                    }
-                    
-                    /* Main Table Style */
-                    table.main-table { 
-                        width: 100%; 
-                        border-collapse: collapse; 
-                        table-layout: fixed;
-                    }
-                    table.main-table th, table.main-table td { 
-                        border: 1px solid #000; 
-                        padding: 4px 2px; 
-                        text-align: center; 
-                        word-wrap: break-word;
-                        vertical-align: middle;
-                        font-size: 7.5pt;
-                    }
-                    table.main-table th { 
-                        font-weight: normal; 
-                        background-color: #ffffff; 
-                        font-size: 8pt;
-                    }
-                </style>
-            </head>
-            <body>
-            """
+            # HTML Header Setup
+            html_parts = ["""<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        @page { 
+            size: A4 portrait; 
+            margin: 10mm 8mm; 
+        }
+        * {
+            box-sizing: border-box;
+        }
+        body { 
+            font-family: Arial, Helvetica, sans-serif; 
+            font-size: 8pt; 
+            color: #000;
+            margin: 0;
+            padding: 0;
+        }
+        .page { 
+            page-break-after: always; 
+        }
+        .page:last-child { 
+            page-break-after: avoid; 
+        }
+        
+        /* Title Style */
+        .header-title { 
+            text-align: center; 
+            font-size: 10pt; 
+            font-weight: bold; 
+            color: #000;
+            margin-bottom: 12px; 
+            line-height: 1.3;
+        }
+        
+        /* Meta Info */
+        .meta-info {
+            margin-bottom: 10px;
+            font-size: 8.5pt;
+            line-height: 1.4;
+        }
+        .meta-table {
+            border-collapse: collapse;
+        }
+        .meta-table td {
+            border: none;
+            padding: 1px 0;
+            vertical-align: top;
+        }
+        
+        /* Main Table Style */
+        table.main-table { 
+            width: 100%; 
+            border-collapse: collapse; 
+            table-layout: fixed;
+        }
+        table.main-table th, table.main-table td { 
+            border: 1px solid #000; 
+            padding: 4px 2px; 
+            text-align: center; 
+            word-wrap: break-word;
+            vertical-align: middle;
+            font-size: 7.5pt;
+        }
+        table.main-table th { 
+            font-weight: normal; 
+            background-color: #ffffff; 
+            font-size: 8pt;
+        }
+    </style>
+</head>
+<body>"""]
             
             halaman_lolos = 0
             
-            with pdfplumber.open(tmp_path) as pdf:
+            with pdfplumber.open(pdf_file) as pdf:
                 for page in pdf.pages:
                     text = page.extract_text() or ""
                     
@@ -111,26 +110,28 @@ if uploaded_file is not None:
                         
                         lines = text.split("\n")
                         for line in lines:
-                            if "NAMA BARANG" in line.upper() or "NAMA" in line.upper():
+                            line_upper = line.upper()
+                            if "NAMA BARANG" in line_upper or "NAMA" in line_upper:
                                 if ":" in line:
                                     nama_barang = line.split(":")[-1].strip()
-                            if "KODE BARANG" in line.upper() or "KODE" in line.upper():
+                            if "KODE BARANG" in line_upper or "KODE" in line_upper:
                                 if ":" in line:
                                     kode_barang = line.split(":")[-1].strip()
-                            if "SATUAN" in line.upper():
+                            if "SATUAN" in line_upper:
                                 if ":" in line:
                                     satuan = line.split(":")[-1].strip()
 
                         # Extract Table Data
                         tables = page.extract_tables()
-                        rows_html = ""
+                        rows_html = []
                         no_counter = 1
                         ada_transaksi_nyata = False
                         
                         if tables:
                             for table in tables:
                                 row_idx = 0
-                                while row_idx < len(table):
+                                table_len = len(table)
+                                while row_idx < table_len:
                                     row = table[row_idx]
                                     row_idx += 1
                                     
@@ -162,7 +163,7 @@ if uploaded_file is not None:
                                         s_rp = clean_row[11] if len(clean_row) > 11 else ""
                                         
                                         # Intip baris saldo di bawah jika ada
-                                        if row_idx < len(table):
+                                        if row_idx < table_len:
                                             next_row = [str(cell).replace('\n', ' ').strip() if cell else '' for cell in table[row_idx]]
                                             if next_row[0].strip().lower() == "saldo":
                                                 if len(next_row) > 11 and next_row[11]:
@@ -176,18 +177,15 @@ if uploaded_file is not None:
                                             k_hrg = ""
 
                                         # FILTER 2: Cek apakah benar-benar ada transaksi/saldo aktif
-                                        # Jika Saldo Awal tapi s_jml == 0 dan s_rp == 0, abaikan sebagai barang kosong!
                                         clean_s_jml = s_jml.replace(',', '').replace('.', '').strip()
                                         clean_m_jml = m_jml.replace(',', '').replace('.', '').strip()
-                                        clean_k_jml = k_jml.replace(',', '').replace('.', '').strip()
                                         
                                         if "saldo awal" in ket.lower() and (clean_s_jml == "0" or clean_s_jml == "") and (clean_m_jml == "0" or clean_m_jml == ""):
-                                            continue # Abaikan transaksi kosong ini
+                                            continue
 
-                                        # Mark bahwa barang ini punya transaksi bernilai
                                         ada_transaksi_nyata = True
 
-                                        rows_html += f"""
+                                        rows_html.append(f"""
                                         <tr>
                                             <td style="width: 4%;">{no_counter}</td>
                                             <td style="width: 11%;">{tgl}</td>
@@ -199,17 +197,15 @@ if uploaded_file is not None:
                                             <td style="width: 7%;">{s_jml}</td>
                                             <td style="width: 18%;">{s_rp}</td>
                                             <td style="width: 8%;">Baik</td>
-                                        </tr>
-                                        """
+                                        </tr>""")
                                         no_counter += 1
 
-                        # Jika barang tidak punya transaksi nyata (misal CAT AVITEX saldo 0), LOMPATIN!
                         if not ada_transaksi_nyata:
                             continue
 
-                        # MINIMAL 24 BARIS PER BARANG (Baris kosong TANPA kata 'Baik')
+                        # Pad 24 baris
                         while no_counter <= 24:
-                            rows_html += f"""
+                            rows_html.append(f"""
                             <tr>
                                 <td style="width: 4%;">{no_counter}</td>
                                 <td style="width: 11%;"></td>
@@ -221,11 +217,11 @@ if uploaded_file is not None:
                                 <td style="width: 7%;"></td>
                                 <td style="width: 18%;"></td>
                                 <td style="width: 8%;"></td>
-                            </tr>
-                            """
+                            </tr>""")
                             no_counter += 1
 
-                        html_template += f"""
+                        # Append halaman
+                        html_parts.append(f"""
                         <div class="page">
                             <div class="header-title">
                                 KARTU MANUAL PERSEDIAAN<br>
@@ -271,28 +267,29 @@ if uploaded_file is not None:
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {rows_html}
+                                    {"".join(rows_html)}
                                 </tbody>
                             </table>
-                        </div>
-                        """
+                        </div>""")
                         halaman_lolos += 1
+
+            html_parts.append("</body></html>")
+            full_html = "".join(html_parts)
             
-            html_template += "</body></html>"
-            
-            pdf_out_path = "Kartu_Manual_Persediaan_Sempurna.pdf"
-            HTML(string=html_template).write_pdf(pdf_out_path)
+            # 2. Render PDF langsung ke BytesIO memori (Tanpa Simpan File Disk)
+            pdf_out_buffer = io.BytesIO()
+            HTML(string=full_html).write_pdf(pdf_out_buffer)
+            pdf_bytes = pdf_out_buffer.getvalue()
             
             if halaman_lolos > 0:
                 st.balloons()
                 st.success(f"Selesai! Berhasil memproses {halaman_lolos} barang aktif ke format rapi!")
                 
-                with open(pdf_out_path, "rb") as f:
-                    st.download_button(
-                        label="📥 DOWNLOAD PDF PERFECT RESULT",
-                        data=f,
-                        file_name="Kartu_Manual_Persediaan_Perfect.pdf",
-                        mime="application/pdf"
-                    )
+                st.download_button(
+                    label="📥 DOWNLOAD PDF PERFECT RESULT",
+                    data=pdf_bytes,
+                    file_name="Kartu_Manual_Persediaan_Perfect.pdf",
+                    mime="application/pdf"
+                )
             else:
                 st.error("Nggak ada transaksi bernilai yang ditemukan di file PDF ini, bro.")
