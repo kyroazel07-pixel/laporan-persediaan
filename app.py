@@ -3,10 +3,10 @@ import pdfplumber
 from weasyprint import HTML
 import tempfile
 
-st.set_page_config(page_title="Buku Persediaan Manual", page_icon="📦", layout="centered")
+st.set_page_config(page_title="Kartu Manual Persediaan", page_icon="📦", layout="centered")
 
-st.title("📦 Konverter Buku Persediaan Manual")
-st.write("Upload PDF mentah, robot bakal susun ke A4 Portrait berwarna & rapi sesuai format standar!")
+st.title("📦 Konverter Kartu Manual Persediaan")
+st.write("Upload PDF mentah, robot bakal langsung bikin persis seperti format instansi resmi!")
 
 uploaded_file = st.file_uploader("Upload File PDF Mentah Lu Di Sini", type=["pdf"])
 
@@ -14,13 +14,12 @@ if uploaded_file is not None:
     st.success("File berhasil di-upload, bro!")
     
     if st.button("🚀 PROSES & BERSIHKAN PDF"):
-        with st.spinner("Lagi memproses & menyusun tabel berwarna... Tunggu sebentar ya!"):
+        with st.spinner("Lagi memproses & menyusun tabel resmi... Tunggu sebentar ya!"):
             
             with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
                 tmp_file.write(uploaded_file.read())
                 tmp_path = tmp_file.name
 
-            # DESAIN HTML/CSS: A4 PORTRAIT, BERWARNA, ELEGAN
             html_template = """
             <!DOCTYPE html>
             <html>
@@ -34,9 +33,9 @@ if uploaded_file is not None:
                         box-sizing: border-box;
                     }
                     body { 
-                        font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; 
+                        font-family: Arial, Helvetica, sans-serif; 
                         font-size: 8pt; 
-                        color: #2c3e50;
+                        color: #000;
                         margin: 0;
                         padding: 0;
                     }
@@ -47,36 +46,29 @@ if uploaded_file is not None:
                         page-break-after: avoid; 
                     }
                     
-                    /* Info Header Box */
-                    .meta-card {
-                        background-color: #f8fafc;
-                        border-left: 4px solid #1e3a8a;
-                        padding: 8px 12px;
+                    /* Title Style */
+                    .header-title { 
+                        text-align: center; 
+                        font-size: 10pt; 
+                        font-weight: bold; 
+                        color: #000;
+                        margin-bottom: 15px; 
+                        line-height: 1.3;
+                    }
+                    
+                    /* Meta Info */
+                    .meta-info {
                         margin-bottom: 12px;
-                        border-radius: 4px;
+                        font-size: 8.5pt;
+                        line-height: 1.4;
                     }
                     .meta-table {
-                        width: 100%;
                         border-collapse: collapse;
                     }
                     .meta-table td {
                         border: none;
-                        padding: 2px 0;
-                        font-size: 8.5pt;
-                        font-weight: bold;
-                        color: #1e293b;
-                        text-align: left;
-                    }
-                    
-                    /* Title Style */
-                    .title { 
-                        text-align: center; 
-                        font-size: 11pt; 
-                        font-weight: bold; 
-                        color: #0f172a;
-                        margin-bottom: 10px; 
-                        text-transform: uppercase;
-                        letter-spacing: 0.5px;
+                        padding: 1px 0;
+                        vertical-align: top;
                     }
                     
                     /* Main Table Style */
@@ -86,22 +78,16 @@ if uploaded_file is not None:
                         table-layout: fixed;
                     }
                     table.main-table th, table.main-table td { 
-                        border: 1px solid #94a3b8; 
-                        padding: 5px 3px; 
+                        border: 1px solid #000; 
+                        padding: 4px 2px; 
                         text-align: center; 
                         word-wrap: break-word;
+                        vertical-align: middle;
                     }
                     table.main-table th { 
-                        font-weight: bold; 
-                        background-color: #1e3a8a; 
-                        color: #ffffff;
-                        font-size: 7.5pt;
-                    }
-                    table.main-table th.sub-header {
-                        background-color: #1e40af;
-                    }
-                    table.main-table tr:nth-child(even) {
-                        background-color: #f1f5f9;
+                        font-weight: normal; 
+                        background-color: #ffffff; 
+                        font-size: 8pt;
                     }
                     .text-left { text-align: left !important; }
                     .text-right { text-align: right !important; }
@@ -149,76 +135,89 @@ if uploaded_file is not None:
                                         row_str = " ".join(clean_row).lower()
                                         
                                         # Skip header bawaan PDF
-                                        if "no" in clean_row[0].lower() or "tanggal" in row_str or "keterangan" in row_str or "satuan" in row_str:
+                                        if "no" in clean_row[0].lower() or "tanggal" in row_str or "keterangan" in row_str or "satuan" in row_str or "unit" in row_str:
                                             continue
                                             
-                                        # Ambil data transaksi
+                                        # Ambil data transaksi & kunci posisi kolomnya
                                         tgl = clean_row[1] if len(clean_row) > 1 else ""
                                         ket = clean_row[2] if len(clean_row) > 2 else ""
                                         
-                                        # Mapping kolom sesuai PDF mentah lu
+                                        # Pemetaan Kolom Presisi Sesuai Data PDF Mentah
                                         m_jml = clean_row[4] if len(clean_row) > 4 else ""
                                         m_hrg = clean_row[5] if len(clean_row) > 5 else ""
+                                        
                                         k_jml = clean_row[7] if len(clean_row) > 7 else ""
                                         k_hrg = clean_row[8] if len(clean_row) > 8 else ""
+                                        
                                         s_jml = clean_row[10] if len(clean_row) > 10 else ""
                                         s_rp  = clean_row[11] if len(clean_row) > 11 else ""
-                                        kond  = clean_row[12] if len(clean_row) > 12 else "Baik"
+                                        
+                                        # Jika Saldo Awal, penyesuaian kolom
+                                        if "saldo awal" in ket.lower():
+                                            m_hrg = ""
+                                            k_jml = ""
+                                            k_hrg = ""
 
-                                        if ket or tgl or m_jml or k_jml:
+                                        if ket or tgl or m_jml or k_jml or s_jml:
                                             rows_html += f"""
                                             <tr>
-                                                <td style="width: 4%;">{no_counter}</td>
-                                                <td style="width: 11%;">{tgl}</td>
-                                                <td style="width: 20%;" class="text-left">{ket}</td>
+                                                <td style="width: 5%;">{no_counter}</td>
+                                                <td style="width: 12%;">{tgl}</td>
+                                                <td style="width: 21%;">{ket}</td>
                                                 <td style="width: 8%;">{m_jml}</td>
-                                                <td style="width: 10%;" class="text-right">{m_hrg}</td>
+                                                <td style="width: 10%;">{m_hrg}</td>
                                                 <td style="width: 8%;">{k_jml}</td>
-                                                <td style="width: 10%;" class="text-right">{k_hrg}</td>
+                                                <td style="width: 10%;">{k_hrg}</td>
                                                 <td style="width: 8%;">{s_jml}</td>
-                                                <td style="width: 12%;" class="text-right">{s_rp}</td>
-                                                <td style="width: 9%;">{kond}</td>
+                                                <td style="width: 10%;">{s_rp}</td>
+                                                <td style="width: 8%;">Baik</td>
                                             </tr>
                                             """
                                             no_counter += 1
 
-                        # Jika kosong, buatkan 10 baris dummy rapi
-                        if not rows_html:
-                            for i in range(1, 11):
-                                rows_html += f"""
-                                <tr>
-                                    <td>{i}</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td>
-                                </tr>
-                                """
-
                         html_template += f"""
                         <div class="page">
-                            <div class="meta-card">
+                            <div class="header-title">
+                                KARTU MANUAL PERSEDIAAN<br>
+                                KANTOR IMIGRASI KELAS II TPI KUALA TUNGKAL
+                            </div>
+                            
+                            <div class="meta-info">
                                 <table class="meta-table">
-                                    <tr><td style="width: 15%;">Nama Barang</td><td style="width: 2%;">:</td><td>{nama_barang}</td></tr>
+                                    <tr><td style="width: 110px;">Nama Barang</td><td style="width: 15px;">:</td><td>{nama_barang}</td></tr>
                                     <tr><td>Kode Barang</td><td>:</td><td>{kode_barang}</td></tr>
                                     <tr><td>Satuan</td><td>:</td><td>{satuan}</td></tr>
                                 </table>
                             </div>
                             
-                            <div class="title">Buku Persediaan Manual</div>
-                            
                             <table class="main-table">
                                 <thead>
                                     <tr>
-                                        <th rowspan="2" style="width: 4%;">No</th>
-                                        <th rowspan="2" style="width: 11%;">Tanggal</th>
-                                        <th rowspan="2" style="width: 20%;">Keterangan</th>
+                                        <th rowspan="2" style="width: 5%;">No</th>
+                                        <th rowspan="2" style="width: 12%;">Tanggal</th>
+                                        <th rowspan="2" style="width: 21%;">Keterangan</th>
                                         <th rowspan="2" style="width: 8%;">Jumlah Masuk</th>
                                         <th rowspan="2" style="width: 10%;">Harga Satuan</th>
                                         <th rowspan="2" style="width: 8%;">Jumlah Keluar</th>
                                         <th rowspan="2" style="width: 10%;">Harga Satuan</th>
-                                        <th colspan="2" style="width: 20%;">Saldo</th>
-                                        <th rowspan="2" style="width: 9%;">Kondisi Barang</th>
+                                        <th colspan="2" style="width: 18%;">Saldo</th>
+                                        <th rowspan="2" style="width: 8%;">Kondisi Barang</th>
                                     </tr>
                                     <tr>
-                                        <th class="sub-header" style="width: 8%;">Jumlah</th>
-                                        <th class="sub-header" style="width: 12%;">Nilai (Rp)</th>
+                                        <th style="width: 8%;">Jumlah</th>
+                                        <th style="width: 10%;">Nilai (Rp)</th>
+                                    </tr>
+                                    <tr>
+                                        <th>(1)</th>
+                                        <th>(2)</th>
+                                        <th>(3)</th>
+                                        <th>(4)</th>
+                                        <th>(5)</th>
+                                        <th>(6)</th>
+                                        <th>(7)</th>
+                                        <th>(8)</th>
+                                        <th>(9)</th>
+                                        <th>(10)</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -231,18 +230,18 @@ if uploaded_file is not None:
             
             html_template += "</body></html>"
             
-            pdf_out_path = "Buku_Persediaan_Manual_A4_Aesthetic.pdf"
+            pdf_out_path = "Kartu_Manual_Persediaan_Resmi.pdf"
             HTML(string=html_template).write_pdf(pdf_out_path)
             
             if halaman_lolos > 0:
                 st.balloons()
-                st.success(f"Selesai! Berhasil memproses {halaman_lolos} halaman ke format A4 Portrait Berwarna!")
+                st.success(f"Selesai! Berhasil memproses {halaman_lolos} halaman ke format resmi Kanim Kuala Tungkal!")
                 
                 with open(pdf_out_path, "rb") as f:
                     st.download_button(
-                        label="📥 DOWNLOAD PDF BUKU PERSEDIAAN ELEGANT",
+                        label="📥 DOWNLOAD PDF RESMI",
                         data=f,
-                        file_name="Buku_Persediaan_Manual_A4.pdf",
+                        file_name="Kartu_Manual_Persediaan_Resmi.pdf",
                         mime="application/pdf"
                     )
             else:
