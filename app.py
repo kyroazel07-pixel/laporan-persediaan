@@ -4,32 +4,31 @@ import pdfplumber
 import streamlit as st
 from weasyprint import HTML
 
-st.set_page_config(page_title="Kartu Persediaan Perfect", page_icon="📦", layout="centered")
+st.set_page_config(page_title="Kartu Persediaan Fixed", page_icon="📦", layout="centered")
 
 st.title("📦 Konverter Kartu Manual Persediaan")
-st.write("Versi Fix: Tanda titik dua rapi, kalkulasi presisi 100% sesuai PDF asli!")
+st.write("Versi Final: Bebas Saldo Minus, Bebas Barang Kosong, Titik Dua Sejajar Rapi!")
 
 uploaded_file = st.file_uploader("Upload PDF Buku Persediaan", type=["pdf"])
 
 def parse_number(val):
-    """Mengekstrak angka bersih dari cell (mencegah teks bertumpuk)"""
+    """Mengekstrak angka bersih dari cell (hanya baris pertama jika tumpuk)"""
     if not val:
         return 0
-    # Jika ada newline karena tumpuk, ambil baris pertama atau angka paling valid
     first_line = str(val).split('\n')[0].strip()
     digits = re.sub(r'[^\d]', '', first_line)
     return int(digits) if digits else 0
 
 def format_rp(val):
-    if not val:
+    if not val or val == 0:
         return ""
     return f"{val:,}"
 
 if uploaded_file is not None:
     st.success("File PDF berhasil di-upload, bro!")
     
-    if st.button("🚀 PROSES DATA KARTU PERSEDIAAN"):
-        with st.spinner("Lagi memproses & merapikan format data..."):
+    if st.button("🚀 PROSES DATA PERSEDIAAN"):
+        with st.spinner("Sedang memproses & menyaring data..."):
             
             with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
                 tmp_file.write(uploaded_file.read())
@@ -72,14 +71,13 @@ if uploaded_file is not None:
                                 if not any(row):
                                     continue
                                 
-                                # Cek jika baris berisi transaksi utama (misal nomor transaksi 1, 2, 3...)
                                 col0 = str(row[0]).strip() if row[0] else ""
                                 
+                                # Mengambil HANYA baris transaksi utama (No: 1, 2, 3...)
                                 if col0.isdigit():
                                     tgl = str(row[1]).replace('\n', ' ').strip() if len(row) > 1 and row[1] else ""
                                     ket = str(row[2]).replace('\n', ' ').strip() if len(row) > 2 and row[2] else ""
                                     
-                                    # Ambil angka transaksi murni dari kolom utama
                                     m_unit = parse_number(row[4]) if len(row) > 4 else 0
                                     m_hrg  = parse_number(row[5]) if len(row) > 5 else 0
                                     m_tot  = parse_number(row[6]) if len(row) > 6 else 0
@@ -88,9 +86,9 @@ if uploaded_file is not None:
                                     k_hrg  = parse_number(row[8]) if len(row) > 8 else 0
                                     k_tot  = parse_number(row[9]) if len(row) > 9 else 0
 
-                                    # Saldo persediaan dari PDF asli
-                                    s_unit_pdf = parse_number(row[10]) if len(row) > 10 else 0
-                                    s_rp_pdf   = parse_number(row[12]) if len(row) > 12 else 0
+                                    # AMBIL SALDO PERSISI LANGSUNG DARI BARIS PDF ASLI (Mencegah kalkulasi minus)
+                                    s_unit_asli = parse_number(row[10]) if len(row) > 10 else 0
+                                    s_rp_asli   = parse_number(row[12]) if len(row) > 12 else 0
 
                                     grouped_items[item_key]["rows"].append({
                                         "no": int(col0),
@@ -102,11 +100,11 @@ if uploaded_file is not None:
                                         "k_unit": k_unit,
                                         "k_hrg": k_hrg,
                                         "k_tot": k_tot,
-                                        "s_unit_pdf": s_unit_pdf,
-                                        "s_rp_pdf": s_rp_pdf
+                                        "s_unit": s_unit_asli,
+                                        "s_rp": s_rp_asli
                                     })
 
-            # BUILD HTML DENGAN PERBAIKAN FORMAT & RAPIIN TITIK DUA (:)
+            # BUILD HTML FORMAT KARTU MANUAL
             html_template = """
             <!DOCTYPE html>
             <html>
@@ -126,7 +124,6 @@ if uploaded_file is not None:
                         line-height: 1.3;
                     }
                     
-                    /* CSS TABEL DENGAN TITIK DUA RAPI SEJAJAR */
                     .meta-info { margin-bottom: 10px; font-size: 8.5pt; }
                     .meta-table { border-collapse: collapse; margin-bottom: 5px; }
                     .meta-table td { border: none !important; padding: 2px 0; vertical-align: top; }
@@ -152,21 +149,30 @@ if uploaded_file is not None:
             halaman_count = 0
 
             for item_key, data in grouped_items.items():
-                if not data["rows"]:
+                rows = data["rows"]
+                if not rows:
+                    continue
+
+                # --- FILTERING BARANG KOSONG ---
+                # Cek apakah ada mutasi masuk/keluar atau saldo awal > 0
+                has_mutasi = any(r["m_unit"] > 0 or r["k_unit"] > 0 for r in rows)
+                saldo_awal_ada = rows[0]["s_unit"] > 0 or rows[0]["s_rp"] > 0
+
+                # Jika TIDAK ADA mutasi DAN Saldo Awal = 0 (seperti Cat Avitex), SKIP / JANGAN DICETAK!
+                if not has_mutasi and not saldo_awal_ada:
                     continue
 
                 rows_html = ""
                 no_counter = 1
-                
-                running_qty = 0
-                running_rp = 0
 
-                for r in data["rows"]:
-                    # Jika Saldo Awal
+                for r in rows:
+                    m_unit_str = str(r["m_unit"]) if r["m_unit"] > 0 else "0"
+                    m_hrg_str  = format_rp(r["m_hrg"]) if r["m_hrg"] > 0 else ""
+                    k_unit_str = str(r["k_unit"]) if r["k_unit"] > 0 else ""
+                    k_hrg_str  = format_rp(r["k_hrg"]) if r["k_hrg"] > 0 else ""
+
+                    # Khusus Saldo Awal
                     if "saldo awal" in r["ket"].lower() or r["no"] == 1:
-                        running_qty = r["s_unit_pdf"]
-                        running_rp = r["s_rp_pdf"]
-                        
                         rows_html += f"""
                         <tr>
                             <td style="width: 4%;">{no_counter}</td>
@@ -176,26 +182,12 @@ if uploaded_file is not None:
                             <td style="width: 9%;"></td>
                             <td style="width: 7%;"></td>
                             <td style="width: 9%;"></td>
-                            <td style="width: 7%;">{running_qty}</td>
-                            <td style="width: 18%;">{format_rp(running_rp)}</td>
+                            <td style="width: 7%;">{r['s_unit']}</td>
+                            <td style="width: 18%;">{format_rp(r['s_rp'])}</td>
                             <td style="width: 8%;">Baik</td>
                         </tr>
                         """
                     else:
-                        # Akumulasi Mutasi Berjalan Sesuai Aslinya
-                        if r["m_unit"] > 0:
-                            running_qty += r["m_unit"]
-                            running_rp += r["m_tot"] if r["m_tot"] > 0 else (r["m_unit"] * r["m_hrg"])
-                        
-                        if r["k_unit"] > 0:
-                            running_qty -= r["k_unit"]
-                            running_rp -= r["k_tot"] if r["k_tot"] > 0 else (r["k_unit"] * r["k_hrg"])
-
-                        m_unit_str = str(r["m_unit"]) if r["m_unit"] > 0 else "0"
-                        m_hrg_str  = format_rp(r["m_hrg"]) if r["m_hrg"] > 0 else ""
-                        k_unit_str = str(r["k_unit"]) if r["k_unit"] > 0 else "0"
-                        k_hrg_str  = format_rp(r["k_hrg"]) if r["k_hrg"] > 0 else ""
-
                         rows_html += f"""
                         <tr>
                             <td style="width: 4%;">{no_counter}</td>
@@ -205,15 +197,15 @@ if uploaded_file is not None:
                             <td style="width: 9%;">{m_hrg_str}</td>
                             <td style="width: 7%;">{k_unit_str}</td>
                             <td style="width: 9%;">{k_hrg_str}</td>
-                            <td style="width: 7%;">{running_qty}</td>
-                            <td style="width: 18%;">{format_rp(running_rp)}</td>
+                            <td style="width: 7%;">{r['s_unit']}</td>
+                            <td style="width: 18%;">{format_rp(r['s_rp'])}</td>
                             <td style="width: 8%;">Baik</td>
                         </tr>
                         """
                     no_counter += 1
 
-                # Tambah baris kosong pelengkap (sampai 24)
-                while no_counter <= 24:
+                # Tambah baris kosong pelengkap (misal dibuat pas 20 baris per lembar)
+                while no_counter <= 20:
                     rows_html += f"""
                     <tr>
                         <td style="width: 4%;">{no_counter}</td>
@@ -230,7 +222,6 @@ if uploaded_file is not None:
                     """
                     no_counter += 1
 
-                # HTML Header dengan Alignment Titik Dua Sempurna
                 html_template += f"""
                 <div class="page">
                     <div class="header-title">
@@ -290,11 +281,11 @@ if uploaded_file is not None:
 
             html_template += "</body></html>"
             
-            pdf_out = "Kartu_Persediaan_Perfect_Fix.pdf"
+            pdf_out = "Kartu_Persediaan_Final.pdf"
             HTML(string=html_template).write_pdf(pdf_out)
             
             st.balloons()
-            st.success(f"Beres 100%, bro! Total {halaman_count} barang udah presisi & rapi!")
+            st.success(f"Mantap bro! Berhasil dicetak {halaman_count} barang (barang kosong otomatis dibuang).")
             
             with open(pdf_out, "rb") as f:
-                st.download_button("📥 DOWNLOAD PDF PERFECT FIX", f, file_name="Kartu_Persediaan_Perfect_Fix.pdf")
+                st.download_button("📥 DOWNLOAD PDF FINAL", f, file_name="Kartu_Persediaan_Final.pdf")
