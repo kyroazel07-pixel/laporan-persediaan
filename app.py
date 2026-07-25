@@ -1,7 +1,6 @@
 import io
 import re
 import streamlit as st
-from pypdf import PdfReader
 import pdfplumber
 from fpdf import FPDF
 
@@ -78,162 +77,149 @@ class KartuPDF(FPDF):
                 self.cell(col_w[i], 4.5, str(val), border=1, align=align_code)
             self.ln(4.5)
 
+def clean_int(val):
+    try:
+        return int(re.sub(r'[^\d]', '', str(val)))
+    except:
+        return 0
+
+def clean_float(val):
+    try:
+        clean_str = str(val).replace('.', '').replace(',', '.')
+        return float(re.sub(r'[^\d\.]', '', clean_str))
+    except:
+        return 0.0
+
+def fmt_num(val):
+    if not val or val == 0:
+        return ""
+    return f"{int(val):,}".replace(",", ".")
 
 st.set_page_config(page_title="Kartu Manual Persediaan", page_icon="⚡", layout="centered")
 
-st.title("⚡ Konverter Kartu Manual Persediaan (Grouped)")
-st.write("Menggabungkan transaksi barang yang terpecah menjadi 1 halaman ringkas!")
+st.title("⚡ Konverter Kartu Manual Persediaan (Auto Recalculate)")
+st.write("Menghitung ulang Saldo Jumlah & Nilai secara otomatis biar nggak tumpuk-tumpuk!")
 
 uploaded_file = st.file_uploader("Upload File PDF Mentah Di Sini", type=["pdf"])
 
 if uploaded_file is not None:
     st.success("File berhasil di-upload, bro!")
     
-    if st.button("🚀 PROSES & GABUNGKAN HALAMAN"):
-        with st.spinner("Sedang memproses & menggabungkan barang..."):
+    if st.button("🚀 PROSES & HITUNG ULANG SALDO"):
+        with st.spinner("Sedang memproses & menghitung ulang saldo..."):
             
             pdf_bytes = uploaded_file.read()
             pdf_plumber_obj = pdfplumber.open(io.BytesIO(pdf_bytes))
-            reader = PdfReader(io.BytesIO(pdf_bytes))
 
-            # Dictionary untuk menampung data per Kode Barang
-            # Format: { kode_barang: { 'nama': ..., 'satuan': ..., 'rows': [...] } }
             grouped_data = {}
 
-            for idx, page in enumerate(reader.pages):
-                text = page.extract_text() or ""
+            for page in pdf_plumber_obj.pages:
+                text_full = page.extract_text() or ""
+                top_text = page.crop((0, 0, page.width, 180)).extract_text() or ""
                 
-                # Cek jika halaman memiliki transaksi
-                if any(k in text for k in ["Pembelian", "Habis Pakai", "Saldo Awal", "Reklasifikasi"]):
-                    
-                    nama_barang = "-"
-                    kode_barang = "-"
-                    satuan = "-"
-                    
-                    # 1. Ekstrak Header via pdfplumber top-crop
-                    try:
-                        plumber_page = pdf_plumber_obj.pages[idx]
-                        top_text = plumber_page.crop((0, 0, plumber_page.width, 200)).extract_text() or ""
+                nama_barang = "-"
+                kode_barang = "-"
+                satuan = "-"
+                
+                for line in top_text.split("\n"):
+                    if ":" in line:
+                        parts = line.split(":", 1)
+                        label = parts[0].upper()
+                        val = parts[1].strip()
                         
-                        for line in top_text.split("\n"):
-                            line_clean = line.strip()
-                            if ":" in line_clean:
-                                parts = line_clean.split(":", 1)
-                                label = parts[0].upper()
-                                val = parts[1].strip()
-                                
-                                if "NAMA" in label and "BARANG" in label:
-                                    nama_barang = val
-                                elif "KODE" in label and "BARANG" in label:
-                                    kode_barang = val
-                                elif "SATUAN" in label:
-                                    satuan = re.sub(r'SATUAN$', '', val, flags=re.IGNORECASE).strip()
-                    except Exception:
-                        pass
+                        if "NAMA" in label and "BARANG" in label:
+                            nama_barang = val
+                        elif "KODE" in label and "BARANG" in label:
+                            kode_barang = val
+                        elif "SATUAN" in label:
+                            satuan = re.sub(r'SATUAN$', '', val, flags=re.IGNORECASE).strip()
 
-                    # Fallback Regex Header
-                    if nama_barang == "-":
-                        m = re.search(r'Nama\s*Barang\s*:\s*(.+)', text, re.IGNORECASE)
-                        if m: nama_barang = m.group(1).split("Kode")[0].strip()
-                        
-                    if kode_barang == "-":
-                        m = re.search(r'Kode\s*Barang\s*:\s*([\d\.]+)', text, re.IGNORECASE)
-                        if m: kode_barang = m.group(1).strip()
-                        
-                    if satuan == "-":
-                        m = re.search(r'Satuan\s*:\s*([A-Za-z0-9]+)', text, re.IGNORECASE)
-                        if m: satuan = m.group(1).strip()
+                if kode_barang == "-":
+                    m = re.search(r'Kode\s*Barang\s*:\s*([\d\.]+)', text_full, re.IGNORECASE)
+                    if m: kode_barang = m.group(1).strip()
 
-                    if kode_barang == "-":
-                        continue # Abaikan jika kode barang tidak terdeteksi
+                if kode_barang == "-":
+                    continue
 
-                    # Inisialisasi dictionary untuk kode barang ini jika belum ada
-                    if kode_barang not in grouped_data:
-                        grouped_data[kode_barang] = {
-                            'nama': nama_barang,
-                            'satuan': satuan,
-                            'rows': []
-                        }
+                if kode_barang not in grouped_data:
+                    grouped_data[kode_barang] = {
+                        'nama': nama_barang,
+                        'satuan': satuan,
+                        'rows': []
+                    }
 
-                    lines = [l.strip() for l in text.split("\n") if l.strip()]
-
-                    for line in lines:
-                        line_lower = line.lower()
-                        
-                        if any(k in line_lower for k in ["kantor imigrasi", "kartu manual", "nama barang", "kode barang", "halaman", "kondisi barang", "jumlah masuk"]):
+                tables = page.extract_tables()
+                for table in tables:
+                    for row in table:
+                        if not row or len(row) < 3:
                             continue
+                        
+                        row_text = " ".join([str(c) for c in row if c]).lower()
+                        
+                        if any(k in row_text for k in ["pembelian", "habis pakai", "saldo awal", "reklasifikasi", "epson"]):
+                            c = [str(cell).strip() if cell is not None else "" for cell in row]
                             
-                        # Deteksi Kata Kunci Transaksi
-                        if any(k in line_lower for k in ["saldo awal", "pembelian", "habis pakai", "reklasifikasi"]):
-                            
-                            ket = ""
-                            if "saldo awal" in line_lower:
-                                ket = "Saldo Awal"
-                            elif "pembelian" in line_lower:
-                                ket = "Pembelian"
-                            elif "habis pakai" in line_lower:
-                                ket = "Habis Pakai"
-                            elif "reklasifikasi" in line_lower:
-                                ket = "Reklasifikasi Masuk" if "masuk" in line_lower else "Reklasifikasi"
-                            
-                            # Cari tanggal
                             tgl = ""
-                            tgl_match = re.search(r'\d{2}/\d{2}/\d{4}|\d{2}-\d{2}-\d{4}', line)
-                            if tgl_match:
-                                tgl = tgl_match.group(0)
+                            for cell_val in c:
+                                tgl_match = re.search(r'\d{2}/\d{2}/\d{4}|\d{2}-\d{2}-\d{4}|\d{2}-[A-Za-z]{3}-\d{2,4}', cell_val)
+                                if tgl_match:
+                                    tgl = tgl_match.group(0)
+                                    break
 
-                            # Ambil semua deretan angka
-                            numbers = re.findall(r'[\d\.\,]+', line)
-                            
-                            # Filter jika angka "2811323..." ikut kegabung
-                            clean_numbers = []
-                            for num in numbers:
-                                # Jika angka terlalu panjang tanpa pemisah desimal/ribuan, kemungkinan teks gabungan
-                                if len(num) > 10 and '.' not in num and ',' not in num:
-                                    continue
-                                clean_numbers.append(num)
+                            # Menentukan keterangan & tipe transaksi
+                            ket = "Transaksi"
+                            if "saldo awal" in row_text:
+                                ket = c[2] if len(c) > 2 and "saldo" in c[2].lower() else "Saldo Awal"
+                            elif "pembelian" in row_text or "epson" in row_text:
+                                ket = c[2] if len(c) > 2 and c[2] else "Pembelian"
+                            elif "habis pakai" in row_text:
+                                ket = "Habis Pakai"
+                            elif "reklasifikasi" in row_text:
+                                ket = "Reklasifikasi Masuk" if "masuk" in row_text else "Reklasifikasi"
 
-                            m_jml = m_hrg = k_jml = k_hrg = s_jml = s_rp = ""
+                            # Cari angka-angka nominal
+                            all_nums = []
+                            for cell_val in c:
+                                nums = re.findall(r'[\d\.\,]+', cell_val)
+                                for num in nums:
+                                    if num != tgl and len(num) <= 10:
+                                        all_nums.append(num)
 
-                            if "saldo awal" in line_lower:
-                                if len(clean_numbers) >= 2:
-                                    s_jml = clean_numbers[-2]
-                                    s_rp = clean_numbers[-1]
-                                elif len(clean_numbers) == 1:
-                                    s_jml = clean_numbers[0]
-                                
-                                clean_s_jml = s_jml.replace(',', '').replace('.', '').strip()
-                                if clean_s_jml in ["0", ""]:
-                                    continue # Skip saldo awal 0
+                            m_jml = 0
+                            m_hrg = 0.0
+                            k_jml = 0
+                            k_hrg = 0.0
+                            s_awal_jml = 0
+                            s_awal_rp = 0.0
+
+                            is_saldo_awal = "saldo awal" in row_text
+
+                            if is_saldo_awal:
+                                if len(all_nums) >= 2:
+                                    s_awal_jml = clean_int(all_nums[-2])
+                                    s_awal_rp = clean_float(all_nums[-1])
+                                elif len(all_nums) == 1:
+                                    s_awal_jml = clean_int(all_nums[0])
                             else:
-                                if "pembelian" in line_lower or "reklasifikasi" in line_lower:
-                                    if len(clean_numbers) >= 4:
-                                        m_jml = clean_numbers[0]
-                                        m_hrg = clean_numbers[1]
-                                        s_jml = clean_numbers[-2]
-                                        s_rp = clean_numbers[-1]
-                                elif "habis pakai" in line_lower:
-                                    if len(clean_numbers) >= 4:
-                                        k_jml = clean_numbers[0]
-                                        k_hrg = clean_numbers[1]
-                                        s_jml = clean_numbers[-2]
-                                        s_rp = clean_numbers[-1]
+                                if len(all_nums) >= 2:
+                                    m_jml = clean_int(all_nums[0])
+                                    m_hrg = clean_float(all_nums[1])
 
-                            # Tambahkan transaksi ke grup barang ini
                             grouped_data[kode_barang]['rows'].append({
                                 'tgl': tgl,
                                 'ket': ket,
+                                'is_saldo_awal': is_saldo_awal,
                                 'm_jml': m_jml,
                                 'm_hrg': m_hrg,
                                 'k_jml': k_jml,
                                 'k_hrg': k_hrg,
-                                's_jml': s_jml,
-                                's_rp': s_rp
+                                's_awal_jml': s_awal_jml,
+                                's_awal_rp': s_awal_rp
                             })
 
             pdf_plumber_obj.close()
 
-            # --- GENERATE PDF HASIL GABUNGAN ---
+            # --- GENERATE PDF + HITUNG OTOMATIS LOGIKA SALDO ---
             pdf_out = KartuPDF()
             halaman_lolos = 0
 
@@ -243,30 +229,54 @@ if uploaded_file is not None:
                 if not raw_rows:
                     continue
 
-                # Pagination: pecah tiap 24 baris per halaman jika transaksinya > 24
+                # LOGIKA KALKULASI REKAP SALDO
+                running_saldo_jml = 0
+                running_saldo_rp = 0.0
+
+                calculated_rows = []
+
+                for r in raw_rows:
+                    if r['is_saldo_awal']:
+                        running_saldo_jml = r['s_awal_jml']
+                        running_saldo_rp = r['s_awal_rp']
+                        calculated_rows.append([
+                            r['tgl'], r['ket'],
+                            "", "", "", "",
+                            fmt_num(running_saldo_jml),
+                            fmt_num(running_saldo_rp)
+                        ])
+                    else:
+                        m_jml = r['m_jml']
+                        m_hrg = r['m_hrg']
+                        k_jml = r['k_jml']
+                        k_hrg = r['k_hrg']
+
+                        # Hitung saldo baru
+                        running_saldo_jml = running_saldo_jml + m_jml - k_jml
+                        running_saldo_rp = running_saldo_rp + (m_jml * m_hrg) - (k_jml * k_hrg)
+
+                        calculated_rows.append([
+                            r['tgl'], r['ket'],
+                            fmt_num(m_jml), fmt_num(m_hrg),
+                            fmt_num(k_jml), fmt_num(k_hrg),
+                            fmt_num(running_saldo_jml),
+                            fmt_num(running_saldo_rp)
+                        ])
+
+                # Layouting per 24 baris
                 chunk_size = 24
-                for i in range(0, len(raw_rows), chunk_size):
-                    chunk = raw_rows[i:i + chunk_size]
+                for i in range(0, len(calculated_rows), chunk_size):
+                    chunk = calculated_rows[i:i + chunk_size]
                     
                     rows_table = []
                     no_counter = 1
                     
                     for r in chunk:
                         rows_table.append([
-                            no_counter,
-                            r['tgl'],
-                            r['ket'],
-                            r['m_jml'],
-                            r['m_hrg'],
-                            r['k_jml'],
-                            r['k_hrg'],
-                            r['s_jml'],
-                            r['s_rp'],
-                            "Baik"
+                            no_counter, r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], "Baik"
                         ])
                         no_counter += 1
 
-                    # Pad baris kosong sampai 24
                     while no_counter <= 24:
                         rows_table.append([no_counter, "", "", "", "", "", "", "", "", ""])
                         no_counter += 1
@@ -277,13 +287,13 @@ if uploaded_file is not None:
             if halaman_lolos > 0:
                 pdf_bytes_output = pdf_out.output()
                 st.balloons()
-                st.success(f"Selesai! Berhasil menggabungkan transaksi menjadi {halaman_lolos} halaman efisien!")
+                st.success(f"Selesai! Berhasil merapikan & menghitung ulang saldo menjadi {halaman_lolos} halaman!")
                 
                 st.download_button(
-                    label="📥 DOWNLOAD PDF PERFECT MERGED RESULT",
+                    label="📥 DOWNLOAD PDF PERFECT RESULT",
                     data=bytes(pdf_bytes_output),
-                    file_name="Kartu_Manual_Persediaan_Merged.pdf",
+                    file_name="Kartu_Manual_Persediaan_Cleaned.pdf",
                     mime="application/pdf"
                 )
             else:
-                st.error("Nggak ada transaksi bernilai yang ditemukan di file PDF ini, bro.")
+                st.error("Nggak ada transaksi yang terdeteksi, bro.")
