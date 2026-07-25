@@ -2,86 +2,109 @@ import io
 import re
 import streamlit as st
 from pypdf import PdfReader
-from weasyprint import HTML
+from fpdf import FPDF
 
-st.set_page_config(page_title="Kartu Manual Persediaan", page_icon="📦", layout="centered")
+class KartuPDF(FPDF):
+    def __init__(self):
+        super().__init__(orientation='P', unit='mm', format='A4')
+        self.set_auto_page_break(auto=False)
+        self.set_margins(8, 10, 8)
 
-st.title("📦 Konverter Kartu Manual Persediaan")
-st.write("Filter mutasi 0 otomatis dibuang & baris kosong bersih tanpa teks 'Baik' nempel!")
+    def generate_page(self, nama_barang, kode_barang, satuan, rows_data):
+        self.add_page()
+        
+        # --- HEADER ---
+        self.set_font("Arial", 'B', 10)
+        self.cell(0, 4, "KARTU MANUAL PERSEDIAAN", ln=True, align='C')
+        self.cell(0, 4, "KANTOR IMIGRASI KELAS II TPI KUALA TUNGKAL", ln=True, align='C')
+        self.ln(3)
 
-uploaded_file = st.file_uploader("Upload File PDF Mentah Lu Di Sini", type=["pdf"])
+        # --- META INFO ---
+        self.set_font("Arial", '', 8.5)
+        self.cell(28, 4, "Nama Barang", ln=False)
+        self.cell(4, 4, ":", ln=False)
+        self.cell(0, 4, str(nama_barang), ln=True)
+
+        self.cell(28, 4, "Kode Barang", ln=False)
+        self.cell(4, 4, ":", ln=False)
+        self.cell(0, 4, str(kode_barang), ln=True)
+
+        self.cell(28, 4, "Satuan", ln=False)
+        self.cell(4, 4, ":", ln=False)
+        self.cell(0, 4, str(satuan), ln=True)
+        self.ln(3)
+
+        # --- TABEL HEADER ---
+        # Total Lebar = 194 mm
+        col_w = [8, 20, 38, 14, 18, 14, 18, 14, 34, 16] 
+        
+        self.set_font("Arial", '', 7.5)
+        
+        # Row 1 Header
+        x_start = self.get_x()
+        y_start = self.get_y()
+
+        # Cell dengan rowspan manual (tinggi 12mm)
+        self.cell(col_w[0], 12, "No", border=1, align='C')
+        self.cell(col_w[1], 12, "Tanggal", border=1, align='C')
+        self.cell(col_w[2], 12, "Keterangan", border=1, align='C')
+        self.cell(col_w[3], 12, "Jml Masuk", border=1, align='C')
+        self.cell(col_w[4], 12, "Hrg Satuan", border=1, align='C')
+        self.cell(col_w[5], 12, "Jml Keluar", border=1, align='C')
+        self.cell(col_w[6], 12, "Hrg Satuan", border=1, align='C')
+        
+        # Saldo Group Header (colspan 2)
+        x_saldo = self.get_x()
+        self.cell(col_w[7] + col_w[8], 6, "Saldo", border=1, align='C')
+        
+        # Kondisi Barang
+        self.cell(col_w[9], 12, "Kondisi", border=1, align='C')
+        
+        # Sub-header Saldo
+        self.set_xy(x_saldo, y_start + 6)
+        self.cell(col_w[7], 6, "Jumlah", border=1, align='C')
+        self.cell(col_w[8], 6, "Nilai (Rp)", border=1, align='C')
+
+        # Reset posisi ke baris berikutnya
+        self.set_xy(x_start, y_start + 12)
+
+        # Sub-header Nomor Kolom (1)-(10)
+        for i, w in enumerate(col_w):
+            self.cell(w, 4, f"({i+1})", border=1, align='C')
+        self.ln(4)
+
+        # --- BODY TABEL (24 BARIS) ---
+        self.set_font("Arial", '', 7)
+        for row in rows_data:
+            for i, val in enumerate(row):
+                # Alignment khusus
+                align_code = 'C'
+                if i in [2]: # Keterangan rata kiri
+                    align_code = 'L'
+                elif i in [3, 4, 5, 6, 7, 8]: # Angka rata kanan
+                    align_code = 'R'
+
+                self.cell(col_w[i], 4.5, str(val), border=1, align=align_code)
+            self.ln(4.5)
+
+
+st.set_page_config(page_title="Kartu Manual Persediaan", page_icon="⚡", layout="centered")
+
+st.title("⚡ Konverter Kartu Manual Persediaan (Ultra Fast)")
+st.write("Versi paling cepat & ringan. Filter mutasi 0 otomatis dibuang!")
+
+uploaded_file = st.file_uploader("Upload File PDF Mentah Di Sini", type=["pdf"])
 
 if uploaded_file is not None:
     st.success("File berhasil di-upload, bro!")
     
-    if st.button("🚀 PROSES & BERSIHKAN PDF"):
-        with st.spinner("Lagi memproses & memfilter barang aktif... Tunggu sebentar ya!"):
+    if st.button("🚀 PROSES KILAT (INSTANT)"):
+        with st.spinner("Sedang memproses secara instan..."):
             
-            # Read direct in-memory
             pdf_bytes = uploaded_file.read()
             reader = PdfReader(io.BytesIO(pdf_bytes))
 
-            html_parts = ["""<!DOCTYPE html>
-<html>
-<head>
-    <style>
-        @page { 
-            size: A4 portrait; 
-            margin: 10mm 8mm; 
-        }
-        * { box-sizing: border-box; }
-        body { 
-            font-family: Arial, Helvetica, sans-serif; 
-            font-size: 8pt; 
-            color: #000;
-            margin: 0; padding: 0;
-        }
-        .page { page-break-after: always; }
-        .page:last-child { page-break-after: avoid; }
-        
-        .header-title { 
-            text-align: center; 
-            font-size: 10pt; 
-            font-weight: bold; 
-            color: #000;
-            margin-bottom: 12px; 
-            line-height: 1.3;
-        }
-        
-        .meta-info {
-            margin-bottom: 10px;
-            font-size: 8.5pt;
-            line-height: 1.4;
-        }
-        .meta-table { border-collapse: collapse; }
-        .meta-table td {
-            border: none;
-            padding: 1px 0;
-            vertical-align: top;
-        }
-        
-        table.main-table { 
-            width: 100%; 
-            border-collapse: collapse; 
-            table-layout: fixed;
-        }
-        table.main-table th, table.main-table td { 
-            border: 1px solid #000; 
-            padding: 4px 2px; 
-            text-align: center; 
-            word-wrap: break-word;
-            vertical-align: middle;
-            font-size: 7.5pt;
-        }
-        table.main-table th { 
-            font-weight: normal; 
-            background-color: #ffffff; 
-            font-size: 8pt;
-        }
-    </style>
-</head>
-<body>"""]
-            
+            pdf_out = KartuPDF()
             halaman_lolos = 0
             
             for page in reader.pages:
@@ -94,38 +117,37 @@ if uploaded_file is not None:
                     kode_barang = "-"
                     satuan = "-"
                     
-                    lines = [l.strip() for l in text.split("\n") if l.strip()]
-                    
-                    # Extract Metadata
-                    for line in lines:
-                        line_upper = line.upper()
-                        if ("NAMA BARANG" in line_upper or "NAMA" in line_upper) and ":" in line:
-                            nama_barang = line.split(":")[-1].strip()
-                        elif ("KODE BARANG" in line_upper or "KODE" in line_upper) and ":" in line:
-                            kode_barang = line.split(":")[-1].strip()
-                        elif "SATUAN" in line_upper and ":" in line:
-                            satuan = line.split(":")[-1].strip()
+                    # Regex Header Extraction
+                    nama_match = re.search(r'Nama\s*Barang\s*:\s*([^:\n]+?)(?=\s*(?:Kode|Satuan|No|Tanggal|\n|$))', text, re.IGNORECASE)
+                    if nama_match:
+                        raw_nama = nama_match.group(1).strip()
+                        raw_nama = re.sub(r'KANTOR\s+IMIGRASI.*$', '', raw_nama, flags=re.IGNORECASE).strip()
+                        if raw_nama:
+                            nama_barang = raw_nama
 
-                    rows_html = []
+                    kode_match = re.search(r'Kode\s*Barang\s*:\s*([\d\.]+)', text, re.IGNORECASE)
+                    if kode_match:
+                        kode_barang = kode_match.group(1).strip()
+
+                    satuan_match = re.search(r'Satuan\s*:\s*([A-Za-z0-9]+)', text, re.IGNORECASE)
+                    if satuan_match:
+                        raw_satuan = satuan_match.group(1).strip()
+                        satuan = re.sub(r'SATUAN$', '', raw_satuan, flags=re.IGNORECASE).strip()
+
+                    lines = [l.strip() for l in text.split("\n") if l.strip()]
+
+                    rows_data = []
                     no_counter = 1
                     ada_transaksi_nyata = False
                     
                     for line in lines:
                         line_lower = line.lower()
                         
-                        # Skip header/footer/unnecessary text
-                        if any(k in line_lower for k in ["kantor imigrasi", "kartu manual", "nama barang", "kode barang", "satuan", "halaman", "kondisi barang", "jumlah masuk"]):
+                        if any(k in line_lower for k in ["kantor imigrasi", "kartu manual", "nama barang", "kode barang", "halaman", "kondisi barang", "jumlah masuk"]):
                             continue
                             
-                        # Cek baris transaksi (biasanya diawali nomor atau tanggal)
-                        parts = re.split(r'\s{2,}', line) # Split berdasar spasi ganda/tab
-                        if len(parts) < 3:
-                            parts = line.split(" ")
-                        
-                        # Deteksi kata kunci transaksi
                         if "saldo awal" in line_lower or "pembelian" in line_lower or "habis pakai" in line_lower:
                             
-                            # Ekstraksi komponen transaksi
                             ket = ""
                             if "saldo awal" in line_lower:
                                 ket = "Saldo Awal"
@@ -134,20 +156,16 @@ if uploaded_file is not None:
                             elif "habis pakai" in line_lower:
                                 ket = "Habis Pakai"
                             
-                            # Ambil angka-angka dari baris ini
                             numbers = re.findall(r'[\d\.\,]+', line)
                             
-                            # Filter angka versi ringkas
                             tgl = ""
                             m_jml = m_hrg = k_jml = k_hrg = s_jml = s_rp = ""
                             
-                            # Cari tanggal (format dd/mm/yyyy atau sejenis)
                             tgl_match = re.search(r'\d{2}/\d{2}/\d{4}|\d{2}-\d{2}-\d{4}', line)
                             if tgl_match:
                                 tgl = tgl_match.group(0)
 
                             if "saldo awal" in line_lower:
-                                # Biasanya Saldo Awal cuma punya saldo jml & saldo rp
                                 if len(numbers) >= 2:
                                     s_jml = numbers[-2]
                                     s_rp = numbers[-1]
@@ -156,7 +174,7 @@ if uploaded_file is not None:
                                 
                                 clean_s_jml = s_jml.replace(',', '').replace('.', '').strip()
                                 if clean_s_jml in ["0", ""]:
-                                    continue # Skip saldo awal 0
+                                    continue
                                     
                             else:
                                 if "pembelian" in line_lower:
@@ -173,111 +191,32 @@ if uploaded_file is not None:
                                         s_rp = numbers[-1]
 
                             ada_transaksi_nyata = True
-
-                            rows_html.append(f"""
-                            <tr>
-                                <td style="width: 4%;">{no_counter}</td>
-                                <td style="width: 11%;">{tgl}</td>
-                                <td style="width: 20%;">{ket}</td>
-                                <td style="width: 7%;">{m_jml}</td>
-                                <td style="width: 9%;">{m_hrg}</td>
-                                <td style="width: 7%;">{k_jml}</td>
-                                <td style="width: 9%;">{k_hrg}</td>
-                                <td style="width: 7%;">{s_jml}</td>
-                                <td style="width: 18%;">{s_rp}</td>
-                                <td style="width: 8%;">Baik</td>
-                            </tr>""")
+                            rows_data.append([no_counter, tgl, ket, m_jml, m_hrg, k_jml, k_hrg, s_jml, s_rp, "Baik"])
                             no_counter += 1
 
                     if not ada_transaksi_nyata:
                         continue
 
-                    # Fill sisa baris kosong sampai 24
+                    # Pad baris kosong sampai 24
                     while no_counter <= 24:
-                        rows_html.append(f"""
-                        <tr>
-                            <td style="width: 4%;">{no_counter}</td>
-                            <td style="width: 11%;"></td>
-                            <td style="width: 20%;"></td>
-                            <td style="width: 7%;"></td>
-                            <td style="width: 9%;"></td>
-                            <td style="width: 7%;"></td>
-                            <td style="width: 9%;"></td>
-                            <td style="width: 7%;"></td>
-                            <td style="width: 18%;"></td>
-                            <td style="width: 8%;"></td>
-                        </tr>""")
+                        rows_data.append([no_counter, "", "", "", "", "", "", "", "", ""])
                         no_counter += 1
 
-                    # Append halaman
-                    html_parts.append(f"""
-                    <div class="page">
-                        <div class="header-title">
-                            KARTU MANUAL PERSEDIAAN<br>
-                            KANTOR IMIGRASI KELAS II TPI KUALA TUNGKAL
-                        </div>
-                        
-                        <div class="meta-info">
-                            <table class="meta-table">
-                                <tr><td style="width: 110px;">Nama Barang</td><td style="width: 15px;">:</td><td>{nama_barang}</td></tr>
-                                <tr><td>Kode Barang</td><td>:</td><td>{kode_barang}</td></tr>
-                                <tr><td>Satuan</td><td>:</td><td>{satuan}</td></tr>
-                            </table>
-                        </div>
-                        
-                        <table class="main-table">
-                            <thead>
-                                <tr>
-                                    <th rowspan="2" style="width: 4%;">No</th>
-                                    <th rowspan="2" style="width: 11%;">Tanggal</th>
-                                    <th rowspan="2" style="width: 20%;">Keterangan</th>
-                                    <th rowspan="2" style="width: 7%;">Jumlah Masuk</th>
-                                    <th rowspan="2" style="width: 9%;">Harga Satuan</th>
-                                    <th rowspan="2" style="width: 7%;">Jumlah Keluar</th>
-                                    <th rowspan="2" style="width: 9%;">Harga Satuan</th>
-                                    <th colspan="2" style="width: 25%;">Saldo</th>
-                                    <th rowspan="2" style="width: 8%;">Kondisi Barang</th>
-                                </tr>
-                                <tr>
-                                    <th style="width: 7%;">Jumlah</th>
-                                    <th style="width: 18%;">Nilai (Rp)</th>
-                                </tr>
-                                <tr>
-                                    <th>(1)</th>
-                                    <th>(2)</th>
-                                    <th>(3)</th>
-                                    <th>(4)</th>
-                                    <th>(5)</th>
-                                    <th>(6)</th>
-                                    <th>(7)</th>
-                                    <th>(8)</th>
-                                    <th>(9)</th>
-                                    <th>(10)</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {"".join(rows_html)}
-                            </tbody>
-                        </table>
-                    </div>""")
+                    # Generate Halaman PDF
+                    pdf_out.generate_page(nama_barang, kode_barang, satuan, rows_data)
                     halaman_lolos += 1
 
-            html_parts.append("</body></html>")
-            full_html = "".join(html_parts)
-            
-            # Weasyprint compile directly to byte buffer
-            pdf_out_buffer = io.BytesIO()
-            HTML(string=full_html).write_pdf(pdf_out_buffer)
-            pdf_bytes = pdf_out_buffer.getvalue()
-            
             if halaman_lolos > 0:
+                # Output PDF ke Bytes Buffer
+                pdf_bytes_output = pdf_out.output()
+                
                 st.balloons()
                 st.success(f"Selesai! Berhasil memproses {halaman_lolos} barang aktif secara instan!")
                 
                 st.download_button(
-                    label="📥 DOWNLOAD PDF PERFECT RESULT",
-                    data=pdf_bytes,
-                    file_name="Kartu_Manual_Persediaan_Perfect.pdf",
+                    label="📥 DOWNLOAD PDF ULTRA FAST RESULT",
+                    data=bytes(pdf_bytes_output),
+                    file_name="Kartu_Manual_Persediaan_Fast.pdf",
                     mime="application/pdf"
                 )
             else:
