@@ -1,6 +1,6 @@
+# processor.py
 import pdfplumber
-from weasyprint import HTML
-from templates import render_pdf_html
+from pdf_generator import build_pdf
 
 def process_pdf(pdf_file_bytes):
     pages_data = []
@@ -83,9 +83,7 @@ def process_pdf(pdf_file_bytes):
                     })
 
     if not pages_data:
-        return None, None
+        return None
 
-    pdf_digital = HTML(string=render_pdf_html(pages_data, is_handwritten=False)).write_pdf()
-    pdf_manual = HTML(string=render_pdf_html(pages_data, is_handwritten=True)).write_pdf()
-    
-    return pdf_digital, pdf_manual
+    # Generate PDF dengan ReportLab (Instant Mode)
+    return build_pdf(pages_data)
