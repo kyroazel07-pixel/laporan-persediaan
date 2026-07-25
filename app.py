@@ -6,7 +6,7 @@ import tempfile
 st.set_page_config(page_title="Kartu Manual Persediaan", page_icon="📦", layout="centered")
 
 st.title("📦 Konverter Kartu Manual Persediaan")
-st.write("Format bersih 1 transaksi = 1 baris. Tanpa baris saldo selang-seling!")
+st.write("Filter mutasi 0 otomatis dibuang & baris kosong bersih tanpa teks 'Baik' nempel!")
 
 uploaded_file = st.file_uploader("Upload File PDF Mentah Lu Di Sini", type=["pdf"])
 
@@ -14,7 +14,7 @@ if uploaded_file is not None:
     st.success("File berhasil di-upload, bro!")
     
     if st.button("🚀 PROSES & BERSIHKAN PDF"):
-        with st.spinner("Lagi memproses & menyusun tabel bersih... Tunggu sebentar ya!"):
+        with st.spinner("Lagi memproses & memfilter barang aktif... Tunggu sebentar ya!"):
             
             with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
                 tmp_file.write(uploaded_file.read())
@@ -101,6 +101,7 @@ if uploaded_file is not None:
                 for page in pdf.pages:
                     text = page.extract_text() or ""
                     
+                    # FILTER 1: Harus ada indikasi kata transaksi
                     if "Pembelian" in text or "Habis Pakai" in text or "Saldo Awal" in text:
                         
                         # Extract Header Data
@@ -124,6 +125,7 @@ if uploaded_file is not None:
                         tables = page.extract_tables()
                         rows_html = ""
                         no_counter = 1
+                        ada_transaksi_nyata = False
                         
                         if tables:
                             for table in tables:
@@ -142,14 +144,13 @@ if uploaded_file is not None:
                                     if "no" in clean_row[0].lower() or "tanggal" in row_str or "keterangan" in row_str or "satuan" in row_str or "unit" in row_str:
                                         continue
                                     
-                                    # SKIP BARIS SALDO KOSONG (Genap)
+                                    # Skip baris saldo penutup bawaan
                                     if clean_row[0].strip().lower() == "saldo":
                                         continue
                                         
                                     ket = clean_row[2] if len(clean_row) > 2 else ""
                                     tgl = clean_row[1] if len(clean_row) > 1 else ""
                                     
-                                    # Pastikan ini baris transaksi valid (Saldo Awal, Habis Pakai, Pembelian, dll)
                                     if ket or tgl:
                                         m_jml = clean_row[4] if len(clean_row) > 4 else ""
                                         m_hrg = clean_row[5] if len(clean_row) > 5 else ""
@@ -158,21 +159,33 @@ if uploaded_file is not None:
                                         k_hrg = clean_row[8] if len(clean_row) > 8 else ""
                                         
                                         s_jml = clean_row[10] if len(clean_row) > 10 else ""
-                                        
-                                        # Ambil Nilai Rp dari baris penutup 'Saldo' di bawahnya jika ada
                                         s_rp = clean_row[11] if len(clean_row) > 11 else ""
+                                        
+                                        # Intip baris saldo di bawah jika ada
                                         if row_idx < len(table):
                                             next_row = [str(cell).replace('\n', ' ').strip() if cell else '' for cell in table[row_idx]]
                                             if next_row[0].strip().lower() == "saldo":
                                                 if len(next_row) > 11 and next_row[11]:
                                                     s_rp = next_row[11]
-                                                row_idx += 1  # Skip baris 'saldo' penutup tersebut
+                                                row_idx += 1
                                         
-                                        # Format ulang jika Saldo Awal
+                                        # Format Saldo Awal
                                         if "saldo awal" in ket.lower():
                                             m_hrg = ""
                                             k_jml = ""
                                             k_hrg = ""
+
+                                        # FILTER 2: Cek apakah benar-benar ada transaksi/saldo aktif
+                                        # Jika Saldo Awal tapi s_jml == 0 dan s_rp == 0, abaikan sebagai barang kosong!
+                                        clean_s_jml = s_jml.replace(',', '').replace('.', '').strip()
+                                        clean_m_jml = m_jml.replace(',', '').replace('.', '').strip()
+                                        clean_k_jml = k_jml.replace(',', '').replace('.', '').strip()
+                                        
+                                        if "saldo awal" in ket.lower() and (clean_s_jml == "0" or clean_s_jml == "") and (clean_m_jml == "0" or clean_m_jml == ""):
+                                            continue # Abaikan transaksi kosong ini
+
+                                        # Mark bahwa barang ini punya transaksi bernilai
+                                        ada_transaksi_nyata = True
 
                                         rows_html += f"""
                                         <tr>
@@ -190,7 +203,11 @@ if uploaded_file is not None:
                                         """
                                         no_counter += 1
 
-                        # MINIMAL 24 BARIS PER BARANG (Sesuai Konsep Template Manual)
+                        # Jika barang tidak punya transaksi nyata (misal CAT AVITEX saldo 0), LOMPATIN!
+                        if not ada_transaksi_nyata:
+                            continue
+
+                        # MINIMAL 24 BARIS PER BARANG (Baris kosong TANPA kata 'Baik')
                         while no_counter <= 24:
                             rows_html += f"""
                             <tr>
@@ -203,7 +220,7 @@ if uploaded_file is not None:
                                 <td style="width: 9%;"></td>
                                 <td style="width: 7%;"></td>
                                 <td style="width: 18%;"></td>
-                                <td style="width: 8%;">Baik</td>
+                                <td style="width: 8%;"></td>
                             </tr>
                             """
                             no_counter += 1
@@ -263,19 +280,19 @@ if uploaded_file is not None:
             
             html_template += "</body></html>"
             
-            pdf_out_path = "Kartu_Manual_Persediaan_Bersih.pdf"
+            pdf_out_path = "Kartu_Manual_Persediaan_Sempurna.pdf"
             HTML(string=html_template).write_pdf(pdf_out_path)
             
             if halaman_lolos > 0:
                 st.balloons()
-                st.success(f"Selesai! Berhasil memproses {halaman_lolos} halaman ke format bersih Gambar 1!")
+                st.success(f"Selesai! Berhasil memproses {halaman_lolos} barang aktif ke format rapi!")
                 
                 with open(pdf_out_path, "rb") as f:
                     st.download_button(
-                        label="📥 DOWNLOAD PDF RESMI CLEAN",
+                        label="📥 DOWNLOAD PDF PERFECT RESULT",
                         data=f,
-                        file_name="Kartu_Manual_Persediaan_Clean.pdf",
+                        file_name="Kartu_Manual_Persediaan_Perfect.pdf",
                         mime="application/pdf"
                     )
             else:
-                st.error("Nggak ada transaksi valid yang ditemukan di file PDF ini, bro.")
+                st.error("Nggak ada transaksi bernilai yang ditemukan di file PDF ini, bro.")
