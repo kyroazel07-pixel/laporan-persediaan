@@ -8,14 +8,14 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 def build_pdf(pages_data):
     buffer = io.BytesIO()
     
-    # Margin Kiri-Kanan diset 18 pt biar dapet total ruang horizontal 559 pt
+    # Margin Kiri-Kanan 15 pt -> Lebar area cetak A4 = 595.27 - 30 = 565.27 pt
     doc = SimpleDocTemplate(
         buffer,
         pagesize=A4,
-        rightMargin=18,
-        leftMargin=18,
-        topMargin=20,
-        bottomMargin=20
+        rightMargin=15,
+        leftMargin=15,
+        topMargin=15,
+        bottomMargin=15
     )
     
     styles = getSampleStyleSheet()
@@ -25,7 +25,7 @@ def build_pdf(pages_data):
         parent=styles['Normal'],
         fontName='Helvetica-Bold',
         fontSize=10,
-        leading=13,
+        leading=12,
         alignment=1 # Center
     )
     
@@ -33,16 +33,16 @@ def build_pdf(pages_data):
         'MetaStyle',
         parent=styles['Normal'],
         fontName='Helvetica',
-        fontSize=8.5,
-        leading=11
+        fontSize=8,
+        leading=10
     )
     
     cell_style = ParagraphStyle(
         'CellStyle',
         parent=styles['Normal'],
         fontName='Helvetica',
-        fontSize=7,
-        leading=8.5,
+        fontSize=6.5,
+        leading=8,
         alignment=1 # Center
     )
     
@@ -57,30 +57,35 @@ def build_pdf(pages_data):
     for idx, item in enumerate(pages_data):
         # Header
         story.append(Paragraph("KARTU MANUAL PERSEDIAAN<br/>KANTOR IMIGRASI KELAS II TPI KUALA TUNGKAL", title_style))
-        story.append(Spacer(1, 10))
+        story.append(Spacer(1, 8))
 
         # Metadata
         meta_data = [
-            [Paragraph("Nama Barang", meta_style), Paragraph(":", meta_style), Paragraph(item['nama_barang'], meta_style)],
-            [Paragraph("Kode Barang", meta_style), Paragraph(":", meta_style), Paragraph(item['kode_barang'], meta_style)],
-            [Paragraph("Satuan", meta_style), Paragraph(":", meta_style), Paragraph(item['satuan'], meta_style)]
+            [Paragraph("Nama Barang", meta_style), Paragraph(":", meta_style), Paragraph(str(item['nama_barang']), meta_style)],
+            [Paragraph("Kode Barang", meta_style), Paragraph(":", meta_style), Paragraph(str(item['kode_barang']), meta_style)],
+            [Paragraph("Satuan", meta_style), Paragraph(":", meta_style), Paragraph(str(item['satuan']), meta_style)]
         ]
-        meta_table = Table(meta_data, colWidths=[80, 10, 460])
+        meta_table = Table(meta_data, colWidths=[75, 10, 470])
         meta_table.setStyle(TableStyle([
             ('VALIGN', (0,0), (-1,-1), 'TOP'),
             ('PADDING', (0,0), (-1,-1), 0),
-            ('BOTTOMPADDING', (0,0), (-1,-1), 2),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 1),
         ]))
         story.append(meta_table)
-        story.append(Spacer(1, 8))
+        story.append(Spacer(1, 6))
 
-        # Tabel Utama
+        # Header Tabel Utama (Dipecah pakai <br/> biar gak bikin crash)
         table_data = [
             [
-                Paragraph("No", cell_bold), Paragraph("Tanggal", cell_bold), Paragraph("Keterangan", cell_bold),
-                Paragraph("Jumlah Masuk", cell_bold), Paragraph("Harga Satuan", cell_bold),
-                Paragraph("Jumlah Keluar", cell_bold), Paragraph("Harga Satuan", cell_bold),
-                Paragraph("Saldo", cell_bold), "", Paragraph("Kondisi Barang", cell_bold)
+                Paragraph("No", cell_bold), 
+                Paragraph("Tanggal", cell_bold), 
+                Paragraph("Keterangan", cell_bold),
+                Paragraph("Jumlah<br/>Masuk", cell_bold), 
+                Paragraph("Harga<br/>Satuan", cell_bold),
+                Paragraph("Jumlah<br/>Keluar", cell_bold), 
+                Paragraph("Harga<br/>Satuan", cell_bold),
+                Paragraph("Saldo", cell_bold), "", 
+                Paragraph("Kondisi<br/>Barang", cell_bold)
             ],
             [
                 "", "", "", "", "", "", "",
@@ -98,23 +103,23 @@ def build_pdf(pages_data):
         no_counter = 1
         for r in item["rows"]:
             table_data.append([
-                Paragraph(str(r['no']), cell_style), Paragraph(r['tgl'], cell_style),
-                Paragraph(r['ket'], cell_style), Paragraph(r['m_jml'], cell_style),
-                Paragraph(r['m_hrg'], cell_style), Paragraph(r['k_jml'], cell_style),
-                Paragraph(r['k_hrg'], cell_style), Paragraph(r['s_jml'], cell_style),
-                Paragraph(r['s_rp'], cell_style), Paragraph(r['kondisi'], cell_style)
+                Paragraph(str(r['no']), cell_style), Paragraph(str(r['tgl']), cell_style),
+                Paragraph(str(r['ket']), cell_style), Paragraph(str(r['m_jml']), cell_style),
+                Paragraph(str(r['m_hrg']), cell_style), Paragraph(str(r['k_jml']), cell_style),
+                Paragraph(str(r['k_hrg']), cell_style), Paragraph(str(r['s_jml']), cell_style),
+                Paragraph(str(r['s_rp']), cell_style), Paragraph(str(r['kondisi']), cell_style)
             ])
             no_counter += 1
 
-        # Pad 24 baris
+        # Pad sampai 24 baris
         while no_counter <= 24:
             table_data.append([
                 Paragraph(str(no_counter), cell_style), "", "", "", "", "", "", "", "", ""
             ])
             no_counter += 1
 
-        # Lebar persis Portait: Total = 550 pt (Aman banget di bawah margin 559 pt)
-        col_widths = [22, 58, 115, 38, 48, 38, 48, 40, 98, 45]
+        # Total Lebar = 550 pt (Sangat aman dari batas 565 pt)
+        col_widths = [20, 58, 115, 38, 48, 38, 48, 40, 100, 45]
         
         main_table = Table(table_data, colWidths=col_widths, repeatRows=3)
 
@@ -123,11 +128,11 @@ def build_pdf(pages_data):
             ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
             ('ALIGN', (0,0), (-1,-1), 'CENTER'),
             
-            # Padding internal dibuat minimal (0.5 pt) biar kata gak kesempitan
+            # Padding diset 0.5 pt biar lega
             ('LEFTPADDING', (0,0), (-1,-1), 0.5),
             ('RIGHTPADDING', (0,0), (-1,-1), 0.5),
-            ('TOPPADDING', (0,0), (-1,-1), 1.5),
-            ('BOTTOMPADDING', (0,0), (-1,-1), 1.5),
+            ('TOPPADDING', (0,0), (-1,-1), 1),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 1),
             
             # SPAN
             ('SPAN', (0,0), (0,1)),
