@@ -4,31 +4,35 @@ import pdfplumber
 import streamlit as st
 from weasyprint import HTML
 
-st.set_page_config(page_title="Kartu Persediaan Direct Copy", page_icon="📦", layout="centered")
+st.set_page_config(page_title="Kartu Persediaan Runut", page_icon="📦", layout="centered")
 
-st.title("📦 Konverter Kartu Manual Persediaan")
-st.write("Versi Direct Copy: Merekam & menampilkan SELURUH layer rincian persediaan persis sesuai PDF sumber!")
+st.title("📦 Konverter Kartu Manual Persediaan (Format Runut)")
+st.write("Versi Perbaikan: Setiap layer dipecah runut ke bawah 1 per 1, tanpa ada teks gabung/kebentrok!")
 
 uploaded_file = st.file_uploader("Upload PDF Buku Persediaan", type=["pdf"])
 
-def parse_number(val):
-    if not val:
-        return 0
-    digits = re.sub(r'[^\d]', '', str(val).strip())
-    return int(digits) if digits else 0
+def parse_lines_to_numbers(text_cell):
+    """Memecah cell multi-line/multi-layer menjadi list angka bersih"""
+    if not text_cell:
+        return []
+    lines = str(text_cell).split('\n')
+    results = []
+    for l in lines:
+        digits = re.sub(r'[^\d]', '', l.strip())
+        if digits:
+            results.append(int(digits))
+    return results
 
 def format_rp(val):
-    if val is None or val == "" or val == 0:
+    if not val or val == 0:
         return ""
-    if isinstance(val, int):
-        return f"{val:,}"
-    return str(val)
+    return f"{val:,}"
 
 if uploaded_file is not None:
     st.success("File PDF berhasil di-upload, bro!")
     
     if st.button("🚀 PROSES DATA PERSEDIAAN"):
-        with st.spinner("Sedang membaca seluruh layer data riil dari PDF..."):
+        with st.spinner("Sedang memproses & merunutkan seluruh data ke bawah..."):
             
             with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
                 tmp_file.write(uploaded_file.read())
@@ -62,7 +66,7 @@ if uploaded_file is not None:
                                 "nama": nama_barang,
                                 "kode": kode_barang,
                                 "satuan": satuan,
-                                "raw_rows": []
+                                "flat_rows": []
                             }
 
                         tables = page.extract_tables()
@@ -71,46 +75,77 @@ if uploaded_file is not None:
                                 if not any(row):
                                     continue
                                 
-                                # Ambil data mentah per baris / layer
                                 col0 = str(row[0]).strip() if row[0] else ""
-                                col1 = str(row[1]).replace('\n', ' ').strip() if len(row) > 1 and row[1] else ""
-                                col2 = str(row[2]).replace('\n', ' ').strip() if len(row) > 2 and row[2] else ""
-                                
-                                # Cek jika ini baris header / subheader
                                 col_all_str = " ".join([str(c) for c in row if c]).upper()
-                                if "NO" in col_all_str and "TANGGAL" in col_all_str:
-                                    continue
+                                
+                                # Skip header/subheader
                                 if "MASUK" in col_all_str and "KELUAR" in col_all_str:
                                     continue
+                                if "NO" in col_all_str and "TANGGAL" in col_all_str:
+                                    continue
                                 
-                                m_unit = str(row[4]).strip() if len(row) > 4 and row[4] else ""
-                                m_hrg  = str(row[5]).strip() if len(row) > 5 and row[5] else ""
-                                m_tot  = str(row[6]).strip() if len(row) > 6 and row[6] else ""
-                                
-                                k_unit = str(row[7]).strip() if len(row) > 7 and row[7] else ""
-                                k_hrg  = str(row[8]).strip() if len(row) > 8 else ""
-                                k_tot  = str(row[9]).strip() if len(row) > 9 else ""
+                                # Deteksi Transaksi
+                                if col0.isdigit():
+                                    tgl = str(row[1]).replace('\n', ' ').strip() if len(row) > 1 and row[1] else ""
+                                    ket = str(row[2]).replace('\n', ' ').strip() if len(row) > 2 and row[2] else ""
+                                    
+                                    m_units = parse_lines_to_numbers(row[4] if len(row) > 4 else "")
+                                    m_hrgs  = parse_lines_to_numbers(row[5] if len(row) > 5 else "")
+                                    
+                                    k_units = parse_lines_to_numbers(row[7] if len(row) > 7 else "")
+                                    k_hrgs  = parse_lines_to_numbers(row[8] if len(row) > 8 else "")
 
-                                s_unit = str(row[10]).strip() if len(row) > 10 and row[10] else ""
-                                s_hrg  = str(row[11]).strip() if len(row) > 11 else ""
-                                s_tot  = str(row[12]).strip() if len(row) > 12 and row[12] else ""
+                                    s_units = parse_lines_to_numbers(row[10] if len(row) > 10 else "")
+                                    s_hrgs  = parse_lines_to_numbers(row[11] if len(row) > 11 else "")
 
-                                grouped_items[item_key]["raw_rows"].append({
-                                    "no": col0,
-                                    "tgl": col1,
-                                    "ket": col2,
-                                    "m_unit": m_unit,
-                                    "m_hrg": m_hrg,
-                                    "m_tot": m_tot,
-                                    "k_unit": k_unit,
-                                    "k_hrg": k_hrg,
-                                    "k_tot": k_tot,
-                                    "s_unit": s_unit,
-                                    "s_hrg": s_hrg,
-                                    "s_tot": s_tot
-                                })
+                                    # 1. BILA TRANSAKSI SALDO AWAL (Gunakan layer persediaan awal)
+                                    if "saldo awal" in ket.lower() or col0 == "1":
+                                        if s_units and s_hrgs:
+                                            for u, h in zip(s_units, s_hrgs):
+                                                grouped_items[item_key]["flat_rows"].append({
+                                                    "tgl": tgl,
+                                                    "ket": ket,
+                                                    "m_unit": u,
+                                                    "m_hrg": h,
+                                                    "k_unit": 0,
+                                                    "k_hrg": 0
+                                                })
+                                        elif m_units and m_hrgs:
+                                            for u, h in zip(m_units, m_hrgs):
+                                                grouped_items[item_key]["flat_rows"].append({
+                                                    "tgl": tgl,
+                                                    "ket": ket,
+                                                    "m_unit": u,
+                                                    "m_hrg": h,
+                                                    "k_unit": 0,
+                                                    "k_hrg": 0
+                                                })
 
-            # BUILD HTML FORMAT KARTU MANUAL DIRECT COPY
+                                    # 2. BILA TRANSAKSI MASUK / PEMBELIAN
+                                    elif m_units:
+                                        for u, h in zip(m_units, m_hrgs if m_hrgs else [0]*len(m_units)):
+                                            grouped_items[item_key]["flat_rows"].append({
+                                                "tgl": tgl,
+                                                "ket": ket,
+                                                "m_unit": u,
+                                                "m_hrg": h,
+                                                "k_unit": 0,
+                                                "k_hrg": 0
+                                            })
+
+                                    # 3. BILA TRANSAKSI KELUAR / HABIS PAKAI
+                                    elif k_units:
+                                        for u, h in zip(k_units, k_hrgs if k_hrgs else [0]*len(k_units)):
+                                            grouped_items[item_key]["flat_rows"].append({
+                                                "tgl": tgl,
+                                                "ket": ket,
+                                                "m_unit": 0,
+                                                "m_hrg": 0,
+                                                "k_unit": u,
+                                                "k_hrg": h
+                                            })
+
+            # BUILD HTML FORMAT KARTU MANUAL RUNUT
             html_template = """
             <!DOCTYPE html>
             <html>
@@ -140,7 +175,7 @@ if uploaded_file is not None:
                     table.main-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
                     table.main-table th, table.main-table td { 
                         border: 1px solid #000; 
-                        padding: 3px 2px; 
+                        padding: 4px 2px; 
                         text-align: center; 
                         word-wrap: break-word;
                         vertical-align: middle;
@@ -155,71 +190,46 @@ if uploaded_file is not None:
             halaman_count = 0
 
             for item_key, data in grouped_items.items():
-                raw_rows = data["raw_rows"]
-                if not raw_rows:
-                    continue
-
-                # Filter barang kosong (apabila tidak ada saldo/mutasi sama sekali)
-                has_any_data = False
-                for r in raw_rows:
-                    if parse_number(r["m_unit"]) > 0 or parse_number(r["k_unit"]) > 0 or parse_number(r["s_unit"]) > 0:
-                        has_any_data = True
-                        break
-                
-                if not has_any_data:
+                flat_rows = data["flat_rows"]
+                if not flat_rows:
                     continue
 
                 rows_html = ""
-                display_no = 1
-                curr_no = ""
-                curr_tgl = ""
-                curr_ket = ""
+                no_counter = 1
+                running_saldo_unit = 0
+                running_saldo_rp = 0
 
-                for r in raw_rows:
-                    m_u = parse_number(r["m_unit"])
-                    m_h = parse_number(r["m_hrg"])
-                    k_u = parse_number(r["k_unit"])
-                    k_h = parse_number(r["k_hrg"])
-                    s_u = parse_number(r["s_unit"])
-                    s_t = parse_number(r["s_tot"])
+                for r in flat_rows:
+                    m_u_str = str(r["m_unit"]) if r["m_unit"] > 0 else ""
+                    m_h_str = format_rp(r["m_hrg"]) if r["m_hrg"] > 0 else ""
+                    
+                    k_u_str = str(r["k_unit"]) if r["k_unit"] > 0 else ""
+                    k_h_str = format_rp(r["k_hrg"]) if r["k_hrg"] > 0 else ""
 
-                    # Abaikan baris "Saldo" rangkuman total jika ada di paling bawah
-                    if "SALDO" in r["ket"].upper() and not r["no"] and not r["tgl"]:
-                        continue
-
-                    # Update nomor transaksi utama jika ada
-                    if r["no"].isdigit():
-                        curr_no = str(display_no)
-                        display_no += 1
-                        curr_tgl = r["tgl"]
-                        curr_ket = r["ket"]
-                    else:
-                        # Baris rincian layer anak
-                        curr_no = ""
-                        curr_tgl = ""
-                        curr_ket = ""
-
-                    m_u_str = str(m_u) if m_u > 0 else ""
-                    m_h_str = format_rp(m_h) if m_h > 0 else ""
-                    k_u_str = str(k_u) if k_u > 0 else ""
-                    k_h_str = format_rp(k_h) if k_h > 0 else ""
-                    s_u_str = str(s_u) if (s_u > 0 or s_t > 0) else ("0" if curr_no and "saldo awal" in curr_ket.lower() else "")
-                    s_t_str = format_rp(s_t) if s_t > 0 else ""
+                    # Update Saldo Berjalan (Running Total)
+                    if r["m_unit"] > 0:
+                        running_saldo_unit += r["m_unit"]
+                        running_saldo_rp += (r["m_unit"] * r["m_hrg"])
+                    
+                    if r["k_unit"] > 0:
+                        running_saldo_unit -= r["k_unit"]
+                        running_saldo_rp -= (r["k_unit"] * r["k_hrg"])
 
                     rows_html += f"""
                     <tr>
-                        <td style="width: 4%;">{curr_no}</td>
-                        <td style="width: 11%;">{curr_tgl}</td>
-                        <td style="width: 20%;">{curr_ket}</td>
+                        <td style="width: 4%;">{no_counter}</td>
+                        <td style="width: 11%;">{r['tgl']}</td>
+                        <td style="width: 20%;">{r['ket']}</td>
                         <td style="width: 7%;">{m_u_str}</td>
                         <td style="width: 9%;">{m_h_str}</td>
                         <td style="width: 7%;">{k_u_str}</td>
                         <td style="width: 9%;">{k_h_str}</td>
-                        <td style="width: 7%;">{s_u_str}</td>
-                        <td style="width: 18%;">{s_t_str}</td>
+                        <td style="width: 7%;">{running_saldo_unit}</td>
+                        <td style="width: 18%;">{format_rp(running_saldo_rp)}</td>
                         <td style="width: 8%;">Baik</td>
                     </tr>
                     """
+                    no_counter += 1
 
                 html_template += f"""
                 <div class="page">
@@ -280,11 +290,11 @@ if uploaded_file is not None:
 
             html_template += "</body></html>"
             
-            pdf_out = "Kartu_Persediaan_Direct_Copy.pdf"
+            pdf_out = "Kartu_Persediaan_Runut_Fix.pdf"
             HTML(string=html_template).write_pdf(pdf_out)
             
             st.balloons()
-            st.success(f"Selesai bro! Seluruh {halaman_count} barang berhasil dikonversi persis sesuai layer asli!")
+            st.success(f"Mantap bro! Seluruh data berhasil dibuat runut tanpa ada teks bertumpuk ({halaman_count} barang).")
             
             with open(pdf_out, "rb") as f:
-                st.download_button("📥 DOWNLOAD PDF DIRECT COPY", f, file_name="Kartu_Persediaan_Direct_Copy.pdf")
+                st.download_button("📥 DOWNLOAD PDF KARTU RUNUT", f, file_name="Kartu_Persediaan_Runut_Fix.pdf")
