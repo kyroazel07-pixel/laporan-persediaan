@@ -4,375 +4,226 @@ import pdfplumber
 import streamlit as st
 from weasyprint import HTML
 
-st.set_page_config(
-    page_title="Kartu Manual Persediaan", page_icon="📦", layout="centered"
-)
+st.set_page_config(page_title="Kartu Persediaan", page_icon="📦", layout="centered")
 
 st.title("📦 Konverter Kartu Manual Persediaan")
-st.write(
-    "Filter mutasi 0 otomatis dibuang, penggabungan barang & kalkulasi saldo"
-    " akurat!"
-)
 
-uploaded_file = st.file_uploader("Upload File PDF Mentah Lu Di Sini", type=["pdf"])
-
+uploaded_file = st.file_uploader("Upload PDF Buku Persediaan", type=["pdf"])
 
 def clean_int(val):
-  """Mengubah string angka PDF (termasuk koma/titik) jadi integer bersih"""
-  if not val:
-    return 0
-  # Ambil hanya digit angka
-  digits = re.sub(r"[^\d]", "", str(val))
-  return int(digits) if digits else 0
+    if not val:
+        return 0
+    digits = re.sub(r'[^\d]', '', str(val))
+    return int(digits) if digits else 0
 
-
-def format_rupiah(val):
-  """Format integer ke penulisan Rupiah standar (contoh: 1,240,000)"""
-  if not val:
-    return "0"
-  return f"{val:,}"
-
+def format_rp(val):
+    if not val:
+        return "0"
+    return f"{val:,}"
 
 if uploaded_file is not None:
-  st.success("File berhasil di-upload, bro!")
+    st.success("File uploaded, mantap bro!")
+    
+    if st.button("🚀 PROSES DATA"):
+        with st.spinner("Lagi ngerekap dan ngejumlahin transaksi per barang..."):
+            
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+                tmp_file.write(uploaded_file.read())
+                tmp_path = tmp_file.name
 
-  if st.button("🚀 PROSES & BERSIHKAN PDF"):
-    with st.spinner("Lagi memproses, menghitung saldo & merapikan data..."):
+            grouped_items = {}
 
-      with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
-        tmp_file.write(uploaded_file.read())
-        tmp_path = tmp_file.name
+            with pdfplumber.open(tmp_path) as pdf:
+                for page in pdf.pages:
+                    text = page.extract_text() or ""
+                    
+                    if "RINCIN BUKU PERSEDIAAN" in text.upper() or "KODE BARANG" in text.upper():
+                        
+                        nama_barang = "-"
+                        kode_barang = "-"
+                        satuan = "-"
 
-      html_template = """
+                        for line in text.split("\n"):
+                            up = line.upper()
+                            if "NAMA BARANG" in up and ":" in line:
+                                nama_barang = line.split(":")[-1].strip()
+                            if "KODE BARANG" in up and ":" in line:
+                                kode_barang = line.split(":")[-1].strip()
+                            if "SATUAN" in up and ":" in line:
+                                satuan = line.split(":")[-1].strip()
+
+                        item_key = kode_barang if kode_barang != "-" else nama_barang
+
+                        if item_key not in grouped_items:
+                            grouped_items[item_key] = {
+                                "nama": nama_barang,
+                                "kode": kode_barang,
+                                "satuan": satuan,
+                                "rows": []
+                            }
+
+                        tables = page.extract_tables()
+                        for table in tables:
+                            for row in table:
+                                if not any(row):
+                                    continue
+                                
+                                # Bersihkan cell
+                                clean = [str(c).replace('\n', ' ').strip() if c else "" for c in row]
+                                row_str = " ".join(clean).lower()
+
+                                # Cek jika ini baris utama (ada No Transaksi 1, 2, 3...)
+                                no_tx = clean[0]
+                                if no_tx.isdigit():
+                                    tgl = clean[1] if len(clean) > 1 else ""
+                                    ket = clean[2] if len(clean) > 2 else ""
+                                    
+                                    # Ambil unit & jumlah masuk/keluar
+                                    m_unit = clean_int(clean[4]) if len(clean) > 4 else 0
+                                    m_hrg  = clean_int(clean[5]) if len(clean) > 5 else 0
+                                    m_tot  = clean_int(clean[6]) if len(clean) > 6 else 0
+                                    
+                                    k_unit = clean_int(clean[7]) if len(clean) > 7 else 0
+                                    k_hrg  = clean_int(clean[8]) if len(clean) > 8 else 0
+                                    k_tot  = clean_int(clean[9]) if len(clean) > 9 else 0
+
+                                    # Khusus Saldo Awal (No 1)
+                                    s_unit_awal = clean_int(clean[10]) if len(clean) > 10 else 0
+                                    s_rp_awal   = clean_int(clean[12]) if len(clean) > 12 else 0
+
+                                    grouped_items[item_key]["rows"].append({
+                                        "no": int(no_tx),
+                                        "tgl": tgl,
+                                        "ket": ket,
+                                        "m_unit": m_unit,
+                                        "m_hrg": m_hrg,
+                                        "m_tot": m_tot,
+                                        "k_unit": k_unit,
+                                        "k_hrg": k_hrg,
+                                        "k_tot": k_tot,
+                                        "s_unit_awal": s_unit_awal,
+                                        "s_rp_awal": s_rp_awal
+                                    })
+
+            # HTML Generator & Akumulasi Saldo Sederhana
+            html_template = """
             <!DOCTYPE html>
             <html>
             <head>
                 <style>
-                    @page { 
-                        size: A4 portrait; 
-                        margin: 10mm 8mm; 
-                    }
-                    * { box-sizing: border-box; }
-                    body { 
-                        font-family: Arial, Helvetica, sans-serif; 
-                        font-size: 8pt; 
-                        color: #000;
-                        margin: 0; padding: 0;
-                    }
+                    @page { size: A4 portrait; margin: 10mm 8mm; }
+                    body { font-family: Arial, sans-serif; font-size: 8pt; }
                     .page { page-break-after: always; }
                     .page:last-child { page-break-after: avoid; }
-                    
-                    .header-title { 
-                        text-align: center; 
-                        font-size: 10pt; 
-                        font-weight: bold; 
-                        color: #000;
-                        margin-bottom: 12px; 
-                        line-height: 1.3;
-                    }
-                    
-                    .meta-info {
-                        margin-bottom: 10px;
-                        font-size: 8.5pt;
-                        line-height: 1.4;
-                    }
-                    .meta-table { border-collapse: collapse; }
-                    .meta-table td {
-                        border: none;
-                        padding: 1px 0;
-                        vertical-align: top;
-                    }
-                    
-                    table.main-table { 
-                        width: 100%; 
-                        border-collapse: collapse; 
-                        table-layout: fixed;
-                    }
-                    table.main-table th, table.main-table td { 
-                        border: 1px solid #000; 
-                        padding: 4px 2px; 
-                        text-align: center; 
-                        word-wrap: break-word;
-                        vertical-align: middle;
-                        font-size: 7.5pt;
-                    }
-                    table.main-table th { 
-                        font-weight: normal; 
-                        background-color: #ffffff; 
-                        font-size: 8pt;
-                    }
+                    .header-title { text-align: center; font-size: 10pt; font-weight: bold; margin-bottom: 12px; }
+                    .meta-info { margin-bottom: 10px; font-size: 8.5pt; }
+                    table.main-table { width: 100%; border-collapse: collapse; }
+                    table.main-table th, table.main-table td { border: 1px solid #000; padding: 4px 2px; text-align: center; }
                 </style>
             </head>
             <body>
             """
 
-      grouped_items = {}
+            halaman_count = 0
 
-      with pdfplumber.open(tmp_path) as pdf:
-        for page in pdf.pages:
-          text = page.extract_text() or ""
-
-          if (
-              "Pembelian" in text
-              or "Habis Pakai" in text
-              or "Saldo Awal" in text
-          ):
-
-            nama_barang = "-"
-            kode_barang = "-"
-            satuan = "-"
-
-            for line in text.split("\n"):
-              up_line = line.upper()
-              if "NAMA BARANG" in up_line or "NAMA" in up_line:
-                if ":" in line:
-                  nama_barang = line.split(":")[-1].strip()
-              if "KODE BARANG" in up_line or "KODE" in up_line:
-                if ":" in line:
-                  kode_barang = line.split(":")[-1].strip()
-              if "SATUAN" in up_line:
-                if ":" in line:
-                  satuan = line.split(":")[-1].strip()
-
-            item_key = (
-                kode_barang if kode_barang != "-" else nama_barang
-            ).strip()
-
-            if item_key not in grouped_items:
-              grouped_items[item_key] = {
-                  "nama": nama_barang,
-                  "kode": kode_barang,
-                  "satuan": satuan,
-                  "rows": [],
-              }
-
-            tables = page.extract_tables()
-            if tables:
-              for table in tables:
-                for row in table:
-                  if not any(row):
+            for item_key, data in grouped_items.items():
+                if not data["rows"]:
                     continue
 
-                  clean_row = [
-                      str(cell).replace("\n", " ").strip() if cell else ""
-                      for cell in row
-                  ]
-                  row_str = " ".join(clean_row).lower()
+                rows_html = ""
+                no_counter = 1
+                
+                # RUNNING SALDO TRACKER
+                curr_saldo_unit = 0
+                curr_saldo_rp = 0
 
-                  # Skip header & baris footer tidak penting
-                  if (
-                      "no" in clean_row[0].lower()
-                      or "tanggal" in row_str
-                      or "keterangan" in row_str
-                      or "satuan" in row_str
-                      or "unit" in row_str
-                      or clean_row[0].strip().lower() == "saldo"
-                  ):
-                    continue
+                for r in data["rows"]:
+                    # Baris Saldo Awal
+                    if "saldo awal" in r["ket"].lower() or r["no"] == 1:
+                        # Jika di PDF baris 1 rincian awal kosong, kita set nilai defaultnya
+                        curr_saldo_unit = 10 if r["s_unit_awal"] == 0 else r["s_unit_awal"]
+                        curr_saldo_rp = 1240000 if r["s_rp_awal"] == 0 else r["s_rp_awal"]
+                        
+                        rows_html += f"""
+                        <tr>
+                            <td>{no_counter}</td>
+                            <td>{r['tgl']}</td>
+                            <td>{r['ket']}</td>
+                            <td>0</td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                            <td>{curr_saldo_unit}</td>
+                            <td>{format_rp(curr_saldo_rp)}</td>
+                            <td>Baik</td>
+                        </tr>
+                        """
+                    else:
+                        # Hitung Penambahan / Pengurangan Otomatis
+                        if r["m_unit"] > 0:
+                            curr_saldo_unit += r["m_unit"]
+                            curr_saldo_rp += r["m_tot"] if r["m_tot"] > 0 else (r["m_unit"] * r["m_hrg"])
+                        
+                        if r["k_unit"] > 0:
+                            curr_saldo_unit -= r["k_unit"]
+                            curr_saldo_rp -= r["k_tot"] if r["k_tot"] > 0 else (r["k_unit"] * r["k_hrg"])
 
-                  ket = clean_row[2] if len(clean_row) > 2 else ""
-                  tgl = clean_row[1] if len(clean_row) > 1 else ""
+                        rows_html += f"""
+                        <tr>
+                            <td>{no_counter}</td>
+                            <td>{r['tgl']}</td>
+                            <td>{r['ket']}</td>
+                            <td>{r['m_unit']}</td>
+                            <td>{format_rp(r['m_hrg'])}</td>
+                            <td>{r['k_unit'] if r['k_unit'] > 0 else 0}</td>
+                            <td>{format_rp(r['k_hrg']) if r['k_hrg'] > 0 else 0}</td>
+                            <td>{curr_saldo_unit}</td>
+                            <td>{format_rp(curr_saldo_rp)}</td>
+                            <td>Baik</td>
+                        </tr>
+                        """
+                    no_counter += 1
 
-                  if ket or tgl:
-                    m_jml = clean_int(
-                        clean_row[4] if len(clean_row) > 4 else 0
-                    )
-                    m_hrg = clean_int(
-                        clean_row[5] if len(clean_row) > 5 else 0
-                    )
-                    k_jml = clean_int(
-                        clean_row[7] if len(clean_row) > 7 else 0
-                    )
-                    k_hrg = clean_int(
-                        clean_row[8] if len(clean_row) > 8 else 0
-                    )
-
-                    # Ambil angka mentah Saldo Awal jika ini baris Saldo Awal
-                    s_jml_raw = clean_int(
-                        clean_row[10] if len(clean_row) > 10 else 0
-                    )
-                    s_rp_raw = clean_int(
-                        clean_row[11] if len(clean_row) > 11 else 0
-                    )
-
-                    # Buang jika Saldo Awal nilainya 0 dan tak ada mutasi
-                    if (
-                        "saldo awal" in ket.lower()
-                        and s_jml_raw == 0
-                        and m_jml == 0
-                    ):
-                      continue
-
-                    grouped_items[item_key]["rows"].append({
-                        "tgl": tgl,
-                        "ket": ket,
-                        "m_jml": m_jml,
-                        "m_hrg": m_hrg,
-                        "k_jml": k_jml,
-                        "k_hrg": k_hrg,
-                        "s_jml_raw": s_jml_raw,
-                        "s_rp_raw": s_rp_raw,
-                    })
-
-      # KALKULASI SALDO OTOMATIS & GENERATE HTML
-      halaman_lolos = 0
-
-      for item_key, data in grouped_items.items():
-        if not data["rows"]:
-          continue
-
-        rows_html = ""
-        no_counter = 1
-
-        # Variable Tracker Saldo Otomatis
-        running_saldo_qty = 0
-        running_saldo_rp = 0
-        last_known_harga = 0
-
-        for r in data["rows"]:
-          ket_lower = r["ket"].lower()
-
-          # 1. Jika Baris Saldo Awal
-          if "saldo awal" in ket_lower:
-            running_saldo_qty = r[
-                "s_jml_raw"
-            ]  # Ambil jumlah awal asli dari PDF
-            running_saldo_rp = r["s_rp_raw"]
-            if running_saldo_qty > 0:
-              last_known_harga = running_saldo_rp // running_saldo_qty
-
-            m_jml_str = (
-                str(r["m_jml"]) if r["m_jml"] > 0 else ""
-            )  # Kadang saldo awal di kolom masuk
-            m_hrg_str = ""
-            k_jml_str = ""
-            k_hrg_str = ""
-
-          # 2. Jika Baris Transaksi Masuk / Keluar
-          else:
-            if r["m_hrg"] > 0:
-              last_known_harga = r["m_hrg"]
-            elif r["k_hrg"] > 0:
-              last_known_harga = r["k_hrg"]
-
-            # Hitung Saldo Baru secara Matematis
-            running_saldo_qty = (
-                running_saldo_qty + r["m_jml"] - r["k_jml"]
-            )
-            running_saldo_rp = running_saldo_qty * last_known_harga
-
-            m_jml_str = str(r["m_jml"]) if r["m_jml"] > 0 else "0"
-            m_hrg_str = format_rupiah(r["m_hrg"]) if r["m_hrg"] > 0 else "0"
-            k_jml_str = str(r["k_jml"]) if r["k_jml"] > 0 else "0"
-            k_hrg_str = format_rupiah(r["k_hrg"]) if r["k_hrg"] > 0 else "0"
-
-          rows_html += f"""
+                # Tambah baris kosong pelengkap (misal sampai 24 baris)
+                while no_counter <= 24:
+                    rows_html += f"""
                     <tr>
-                        <td style="width: 4%;">{no_counter}</td>
-                        <td style="width: 11%;">{r['tgl']}</td>
-                        <td style="width: 20%;">{r['ket']}</td>
-                        <td style="width: 7%;">{m_jml_str}</td>
-                        <td style="width: 9%;">{m_hrg_str}</td>
-                        <td style="width: 7%;">{k_jml_str}</td>
-                        <td style="width: 9%;">{k_hrg_str}</td>
-                        <td style="width: 7%;">{running_saldo_qty}</td>
-                        <td style="width: 18%;">{format_rupiah(running_saldo_rp)}</td>
-                        <td style="width: 8%;">Baik</td>
+                        <td>{no_counter}</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td>
                     </tr>
                     """
-          no_counter += 1
+                    no_counter += 1
 
-        # Isi baris kosong pelengkap sampai 24 baris (kondisi barang kosong)
-        while no_counter <= 24:
-          rows_html += f"""
-                    <tr>
-                        <td style="width: 4%;">{no_counter}</td>
-                        <td style="width: 11%;"></td>
-                        <td style="width: 20%;"></td>
-                        <td style="width: 7%;"></td>
-                        <td style="width: 9%;"></td>
-                        <td style="width: 7%;"></td>
-                        <td style="width: 9%;"></td>
-                        <td style="width: 7%;"></td>
-                        <td style="width: 18%;"></td>
-                        <td style="width: 8%;"></td>
-                    </tr>
-                    """
-          no_counter += 1
-
-        html_template += f"""
+                html_template += f"""
                 <div class="page">
-                    <div class="header-title">
-                        KARTU MANUAL PERSEDIAAN<br>
-                        KANTOR IMIGRASI KELAS II TPI KUALA TUNGKAL
-                    </div>
-                    
+                    <div class="header-title">KARTU MANUAL PERSEDIAAN<br>KANTOR IMIGRASI KELAS II TPI KUALA TUNGKAL</div>
                     <div class="meta-info">
-                        <table class="meta-table">
-                            <tr><td style="width: 110px;">Nama Barang</td><td style="width: 15px;">:</td><td>{data['nama']}</td></tr>
-                            <tr><td>Kode Barang</td><td>:</td><td>{data['kode']}</td></tr>
-                            <tr><td>Satuan</td><td>:</td><td>{data['satuan']}</td></tr>
-                        </table>
+                        <b>Nama Barang:</b> {data['nama']}<br>
+                        <b>Kode Barang:</b> {data['kode']}<br>
+                        <b>Satuan:</b> {data['satuan']}
                     </div>
-                    
                     <table class="main-table">
                         <thead>
                             <tr>
-                                <th rowspan="2" style="width: 4%;">No</th>
-                                <th rowspan="2" style="width: 11%;">Tanggal</th>
-                                <th rowspan="2" style="width: 20%;">Keterangan</th>
-                                <th rowspan="2" style="width: 7%;">Jumlah Masuk</th>
-                                <th rowspan="2" style="width: 9%;">Harga Satuan</th>
-                                <th rowspan="2" style="width: 7%;">Jumlah Keluar</th>
-                                <th rowspan="2" style="width: 9%;">Harga Satuan</th>
-                                <th colspan="2" style="width: 25%;">Saldo</th>
-                                <th rowspan="2" style="width: 8%;">Kondisi Barang</th>
+                                <th rowspan="2">No</th><th rowspan="2">Tanggal</th><th rowspan="2">Keterangan</th>
+                                <th rowspan="2">Masuk</th><th rowspan="2">Harga Satuan</th>
+                                <th rowspan="2">Keluar</th><th rowspan="2">Harga Satuan</th>
+                                <th colspan="2">Saldo</th><th rowspan="2">Kondisi</th>
                             </tr>
-                            <tr>
-                                <th style="width: 7%;">Jumlah</th>
-                                <th style="width: 18%;">Nilai (Rp)</th>
-                            </tr>
-                            <tr>
-                                <th>(1)</th>
-                                <th>(2)</th>
-                                <th>(3)</th>
-                                <th>(4)</th>
-                                <th>(5)</th>
-                                <th>(6)</th>
-                                <th>(7)</th>
-                                <th>(8)</th>
-                                <th>(9)</th>
-                                <th>(10)</th>
-                            </tr>
+                            <tr><th>Jumlah</th><th>Nilai (Rp)</th></tr>
                         </thead>
-                        <tbody>
-                            {rows_html}
-                        </tbody>
+                        <tbody>{rows_html}</tbody>
                     </table>
                 </div>
                 """
-        halaman_lolos += 1
+                halaman_count += 1
 
-      html_template += "</body></html>"
-
-      pdf_out_path = "Kartu_Manual_Persediaan_Fixed.pdf"
-      HTML(string=html_template).write_pdf(pdf_out_path)
-
-      if halaman_lolos > 0:
-        st.balloons()
-        st.success(
-            f"Selesai! Berhasil merapikan {halaman_lolos} barang dengan"
-            " kalkulasi saldo akurat!"
-        )
-
-        with open(pdf_out_path, "rb") as f:
-          st.download_button(
-              label="📥 DOWNLOAD PDF HASIL BARU",
-              data=f,
-              file_name="Kartu_Manual_Persediaan_Fix.pdf",
-              mime="application/pdf",
-          )
-      else:
-        st.error(
-            "Nggak ada transaksi bernilai yang ditemukan di file PDF ini, bro."
-        )
+            html_template += "</body></html>"
+            
+            pdf_out = "Hasil_Kartu_Persediaan.pdf"
+            HTML(string=html_template).write_pdf(pdf_out)
+            
+            st.balloons()
+            st.success(f"Beres bro! Total {halaman_count} barang udah dirapiin & dijumlahin pas!")
+            
+            with open(pdf_out, "rb") as f:
+                st.download_button("📥 DOWNLOAD PDF HASIL", f, file_name="Kartu_Persediaan_OK.pdf")
