@@ -7,13 +7,15 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
 def build_pdf(pages_data):
     buffer = io.BytesIO()
+    
+    # Margin kanan-kiri diperkecil ke 15 point biar tabel muat leluasa
     doc = SimpleDocTemplate(
         buffer,
         pagesize=A4,
-        rightMargin=22,
-        leftMargin=22,
-        topMargin=28,
-        bottomMargin=28
+        rightMargin=15,
+        leftMargin=15,
+        topMargin=20,
+        bottomMargin=20
     )
     
     styles = getSampleStyleSheet()
@@ -24,24 +26,24 @@ def build_pdf(pages_data):
         fontName='Helvetica-Bold',
         fontSize=10,
         leading=13,
-        alignment=1
+        alignment=1 # Center
     )
     
     meta_style = ParagraphStyle(
         'MetaStyle',
         parent=styles['Normal'],
         fontName='Helvetica',
-        fontSize=8.5,
-        leading=11
+        fontSize=8,
+        leading=10
     )
     
     cell_style = ParagraphStyle(
         'CellStyle',
         parent=styles['Normal'],
         fontName='Helvetica',
-        fontSize=7,
-        leading=8.5,
-        alignment=1
+        fontSize=6.5,
+        leading=8,
+        alignment=1 # Center
     )
     
     cell_bold = ParagraphStyle(
@@ -53,23 +55,26 @@ def build_pdf(pages_data):
     story = []
 
     for idx, item in enumerate(pages_data):
+        # Header
         story.append(Paragraph("KARTU MANUAL PERSEDIAAN<br/>KANTOR IMIGRASI KELAS II TPI KUALA TUNGKAL", title_style))
-        story.append(Spacer(1, 10))
+        story.append(Spacer(1, 8))
 
+        # Meta Table
         meta_data = [
             [Paragraph("Nama Barang", meta_style), Paragraph(":", meta_style), Paragraph(item['nama_barang'], meta_style)],
             [Paragraph("Kode Barang", meta_style), Paragraph(":", meta_style), Paragraph(item['kode_barang'], meta_style)],
             [Paragraph("Satuan", meta_style), Paragraph(":", meta_style), Paragraph(item['satuan'], meta_style)]
         ]
-        meta_table = Table(meta_data, colWidths=[80, 10, 450])
+        meta_table = Table(meta_data, colWidths=[75, 10, 480])
         meta_table.setStyle(TableStyle([
             ('VALIGN', (0,0), (-1,-1), 'TOP'),
             ('PADDING', (0,0), (-1,-1), 0),
-            ('BOTTOMPADDING', (0,0), (-1,-1), 2),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 1),
         ]))
         story.append(meta_table)
-        story.append(Spacer(1, 8))
+        story.append(Spacer(1, 6))
 
+        # Main Table Header
         table_data = [
             [
                 Paragraph("No", cell_bold), Paragraph("Tanggal", cell_bold), Paragraph("Keterangan", cell_bold),
@@ -89,6 +94,7 @@ def build_pdf(pages_data):
             ]
         ]
 
+        # Rows
         no_counter = 1
         for r in item["rows"]:
             table_data.append([
@@ -100,23 +106,25 @@ def build_pdf(pages_data):
             ])
             no_counter += 1
 
+        # Fill up to 24 rows
         while no_counter <= 24:
             table_data.append([
                 Paragraph(str(no_counter), cell_style), "", "", "", "", "", "", "", "", ""
             ])
             no_counter += 1
 
-        col_widths = [22, 58, 110, 38, 50, 38, 50, 38, 98, 44]
+        # Total Lebar = 565 pt (Pas persis di area A4)
+        col_widths = [20, 52, 115, 38, 48, 38, 48, 38, 120, 48]
         main_table = Table(table_data, colWidths=col_widths, repeatRows=3)
 
         t_style = [
             ('GRID', (0,0), (-1,-1), 0.5, colors.black),
             ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
             ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-            ('TOPPADDING', (0,0), (-1,-1), 2),
-            ('BOTTOMPADDING', (0,0), (-1,-1), 2),
-            ('LEFTPADDING', (0,0), (-1,-1), 1),
-            ('RIGHTPADDING', (0,0), (-1,-1), 1),
+            ('TOPPADDING', (0,0), (-1,-1), 1),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 1),
+            ('LEFTPADDING', (0,0), (-1,-1), 0.5),
+            ('RIGHTPADDING', (0,0), (-1,-1), 0.5),
             ('SPAN', (0,0), (0,1)),
             ('SPAN', (1,0), (1,1)),
             ('SPAN', (2,0), (2,1)),
