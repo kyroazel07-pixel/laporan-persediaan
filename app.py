@@ -6,7 +6,7 @@ import tempfile
 st.set_page_config(page_title="Kartu Manual Persediaan", page_icon="📦", layout="centered")
 
 st.title("📦 Konverter Kartu Manual Persediaan")
-st.write("Upload PDF mentah, robot bakal langsung bikin persis seperti format instansi resmi!")
+st.write("Format bersih 1 transaksi = 1 baris. Tanpa baris saldo selang-seling!")
 
 uploaded_file = st.file_uploader("Upload File PDF Mentah Lu Di Sini", type=["pdf"])
 
@@ -14,7 +14,7 @@ if uploaded_file is not None:
     st.success("File berhasil di-upload, bro!")
     
     if st.button("🚀 PROSES & BERSIHKAN PDF"):
-        with st.spinner("Lagi memproses & menyusun tabel resmi... Tunggu sebentar ya!"):
+        with st.spinner("Lagi memproses & menyusun tabel bersih... Tunggu sebentar ya!"):
             
             with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
                 tmp_file.write(uploaded_file.read())
@@ -27,7 +27,7 @@ if uploaded_file is not None:
                 <style>
                     @page { 
                         size: A4 portrait; 
-                        margin: 12mm 10mm; 
+                        margin: 10mm 8mm; 
                     }
                     * {
                         box-sizing: border-box;
@@ -52,13 +52,13 @@ if uploaded_file is not None:
                         font-size: 10pt; 
                         font-weight: bold; 
                         color: #000;
-                        margin-bottom: 15px; 
+                        margin-bottom: 12px; 
                         line-height: 1.3;
                     }
                     
                     /* Meta Info */
                     .meta-info {
-                        margin-bottom: 12px;
+                        margin-bottom: 10px;
                         font-size: 8.5pt;
                         line-height: 1.4;
                     }
@@ -83,14 +83,13 @@ if uploaded_file is not None:
                         text-align: center; 
                         word-wrap: break-word;
                         vertical-align: middle;
+                        font-size: 7.5pt;
                     }
                     table.main-table th { 
                         font-weight: normal; 
                         background-color: #ffffff; 
                         font-size: 8pt;
                     }
-                    .text-left { text-align: left !important; }
-                    .text-right { text-align: right !important; }
                 </style>
             </head>
             <body>
@@ -102,7 +101,6 @@ if uploaded_file is not None:
                 for page in pdf.pages:
                     text = page.extract_text() or ""
                     
-                    # Filter halaman yang ada mutasi/transaksi
                     if "Pembelian" in text or "Habis Pakai" in text or "Saldo Awal" in text:
                         
                         # Extract Header Data
@@ -129,20 +127,30 @@ if uploaded_file is not None:
                         
                         if tables:
                             for table in tables:
-                                for row in table:
-                                    if any(row):
-                                        clean_row = [str(cell).replace('\n', ' ').strip() if cell else '' for cell in row]
-                                        row_str = " ".join(clean_row).lower()
+                                row_idx = 0
+                                while row_idx < len(table):
+                                    row = table[row_idx]
+                                    row_idx += 1
+                                    
+                                    if not any(row):
+                                        continue
                                         
-                                        # Skip header bawaan PDF
-                                        if "no" in clean_row[0].lower() or "tanggal" in row_str or "keterangan" in row_str or "satuan" in row_str or "unit" in row_str:
-                                            continue
-                                            
-                                        # Ambil data transaksi & kunci posisi kolomnya
-                                        tgl = clean_row[1] if len(clean_row) > 1 else ""
-                                        ket = clean_row[2] if len(clean_row) > 2 else ""
+                                    clean_row = [str(cell).replace('\n', ' ').strip() if cell else '' for cell in row]
+                                    row_str = " ".join(clean_row).lower()
+                                    
+                                    # Skip header bawaan PDF
+                                    if "no" in clean_row[0].lower() or "tanggal" in row_str or "keterangan" in row_str or "satuan" in row_str or "unit" in row_str:
+                                        continue
+                                    
+                                    # SKIP BARIS SALDO KOSONG (Genap)
+                                    if clean_row[0].strip().lower() == "saldo":
+                                        continue
                                         
-                                        # Pemetaan Kolom Presisi Sesuai Data PDF Mentah
+                                    ket = clean_row[2] if len(clean_row) > 2 else ""
+                                    tgl = clean_row[1] if len(clean_row) > 1 else ""
+                                    
+                                    # Pastikan ini baris transaksi valid (Saldo Awal, Habis Pakai, Pembelian, dll)
+                                    if ket or tgl:
                                         m_jml = clean_row[4] if len(clean_row) > 4 else ""
                                         m_hrg = clean_row[5] if len(clean_row) > 5 else ""
                                         
@@ -150,30 +158,55 @@ if uploaded_file is not None:
                                         k_hrg = clean_row[8] if len(clean_row) > 8 else ""
                                         
                                         s_jml = clean_row[10] if len(clean_row) > 10 else ""
-                                        s_rp  = clean_row[11] if len(clean_row) > 11 else ""
                                         
-                                        # Jika Saldo Awal, penyesuaian kolom
+                                        # Ambil Nilai Rp dari baris penutup 'Saldo' di bawahnya jika ada
+                                        s_rp = clean_row[11] if len(clean_row) > 11 else ""
+                                        if row_idx < len(table):
+                                            next_row = [str(cell).replace('\n', ' ').strip() if cell else '' for cell in table[row_idx]]
+                                            if next_row[0].strip().lower() == "saldo":
+                                                if len(next_row) > 11 and next_row[11]:
+                                                    s_rp = next_row[11]
+                                                row_idx += 1  # Skip baris 'saldo' penutup tersebut
+                                        
+                                        # Format ulang jika Saldo Awal
                                         if "saldo awal" in ket.lower():
                                             m_hrg = ""
                                             k_jml = ""
                                             k_hrg = ""
 
-                                        if ket or tgl or m_jml or k_jml or s_jml:
-                                            rows_html += f"""
-                                            <tr>
-                                                <td style="width: 5%;">{no_counter}</td>
-                                                <td style="width: 12%;">{tgl}</td>
-                                                <td style="width: 21%;">{ket}</td>
-                                                <td style="width: 8%;">{m_jml}</td>
-                                                <td style="width: 10%;">{m_hrg}</td>
-                                                <td style="width: 8%;">{k_jml}</td>
-                                                <td style="width: 10%;">{k_hrg}</td>
-                                                <td style="width: 8%;">{s_jml}</td>
-                                                <td style="width: 10%;">{s_rp}</td>
-                                                <td style="width: 8%;">Baik</td>
-                                            </tr>
-                                            """
-                                            no_counter += 1
+                                        rows_html += f"""
+                                        <tr>
+                                            <td style="width: 4%;">{no_counter}</td>
+                                            <td style="width: 11%;">{tgl}</td>
+                                            <td style="width: 20%;">{ket}</td>
+                                            <td style="width: 7%;">{m_jml}</td>
+                                            <td style="width: 9%;">{m_hrg}</td>
+                                            <td style="width: 7%;">{k_jml}</td>
+                                            <td style="width: 9%;">{k_hrg}</td>
+                                            <td style="width: 7%;">{s_jml}</td>
+                                            <td style="width: 18%;">{s_rp}</td>
+                                            <td style="width: 8%;">Baik</td>
+                                        </tr>
+                                        """
+                                        no_counter += 1
+
+                        # MINIMAL 24 BARIS PER BARANG (Sesuai Konsep Template Manual)
+                        while no_counter <= 24:
+                            rows_html += f"""
+                            <tr>
+                                <td style="width: 4%;">{no_counter}</td>
+                                <td style="width: 11%;"></td>
+                                <td style="width: 20%;"></td>
+                                <td style="width: 7%;"></td>
+                                <td style="width: 9%;"></td>
+                                <td style="width: 7%;"></td>
+                                <td style="width: 9%;"></td>
+                                <td style="width: 7%;"></td>
+                                <td style="width: 18%;"></td>
+                                <td style="width: 8%;">Baik</td>
+                            </tr>
+                            """
+                            no_counter += 1
 
                         html_template += f"""
                         <div class="page">
@@ -193,19 +226,19 @@ if uploaded_file is not None:
                             <table class="main-table">
                                 <thead>
                                     <tr>
-                                        <th rowspan="2" style="width: 5%;">No</th>
-                                        <th rowspan="2" style="width: 12%;">Tanggal</th>
-                                        <th rowspan="2" style="width: 21%;">Keterangan</th>
-                                        <th rowspan="2" style="width: 8%;">Jumlah Masuk</th>
-                                        <th rowspan="2" style="width: 10%;">Harga Satuan</th>
-                                        <th rowspan="2" style="width: 8%;">Jumlah Keluar</th>
-                                        <th rowspan="2" style="width: 10%;">Harga Satuan</th>
-                                        <th colspan="2" style="width: 18%;">Saldo</th>
+                                        <th rowspan="2" style="width: 4%;">No</th>
+                                        <th rowspan="2" style="width: 11%;">Tanggal</th>
+                                        <th rowspan="2" style="width: 20%;">Keterangan</th>
+                                        <th rowspan="2" style="width: 7%;">Jumlah Masuk</th>
+                                        <th rowspan="2" style="width: 9%;">Harga Satuan</th>
+                                        <th rowspan="2" style="width: 7%;">Jumlah Keluar</th>
+                                        <th rowspan="2" style="width: 9%;">Harga Satuan</th>
+                                        <th colspan="2" style="width: 25%;">Saldo</th>
                                         <th rowspan="2" style="width: 8%;">Kondisi Barang</th>
                                     </tr>
                                     <tr>
-                                        <th style="width: 8%;">Jumlah</th>
-                                        <th style="width: 10%;">Nilai (Rp)</th>
+                                        <th style="width: 7%;">Jumlah</th>
+                                        <th style="width: 18%;">Nilai (Rp)</th>
                                     </tr>
                                     <tr>
                                         <th>(1)</th>
@@ -230,18 +263,18 @@ if uploaded_file is not None:
             
             html_template += "</body></html>"
             
-            pdf_out_path = "Kartu_Manual_Persediaan_Resmi.pdf"
+            pdf_out_path = "Kartu_Manual_Persediaan_Bersih.pdf"
             HTML(string=html_template).write_pdf(pdf_out_path)
             
             if halaman_lolos > 0:
                 st.balloons()
-                st.success(f"Selesai! Berhasil memproses {halaman_lolos} halaman ke format resmi Kanim Kuala Tungkal!")
+                st.success(f"Selesai! Berhasil memproses {halaman_lolos} halaman ke format bersih Gambar 1!")
                 
                 with open(pdf_out_path, "rb") as f:
                     st.download_button(
-                        label="📥 DOWNLOAD PDF RESMI",
+                        label="📥 DOWNLOAD PDF RESMI CLEAN",
                         data=f,
-                        file_name="Kartu_Manual_Persediaan_Resmi.pdf",
+                        file_name="Kartu_Manual_Persediaan_Clean.pdf",
                         mime="application/pdf"
                     )
             else:
