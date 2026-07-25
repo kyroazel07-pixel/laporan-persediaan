@@ -2,6 +2,7 @@ import io
 import re
 import streamlit as st
 from pypdf import PdfReader
+import pdfplumber
 from fpdf import FPDF
 
 class KartuPDF(FPDF):
@@ -35,16 +36,13 @@ class KartuPDF(FPDF):
         self.ln(3)
 
         # --- TABEL HEADER ---
-        # Total Lebar = 194 mm
         col_w = [8, 20, 38, 14, 18, 14, 18, 14, 34, 16] 
         
         self.set_font("Arial", '', 7.5)
         
-        # Row 1 Header
         x_start = self.get_x()
         y_start = self.get_y()
 
-        # Cell dengan rowspan manual (tinggi 12mm)
         self.cell(col_w[0], 12, "No", border=1, align='C')
         self.cell(col_w[1], 12, "Tanggal", border=1, align='C')
         self.cell(col_w[2], 12, "Keterangan", border=1, align='C')
@@ -53,35 +51,28 @@ class KartuPDF(FPDF):
         self.cell(col_w[5], 12, "Jml Keluar", border=1, align='C')
         self.cell(col_w[6], 12, "Hrg Satuan", border=1, align='C')
         
-        # Saldo Group Header (colspan 2)
         x_saldo = self.get_x()
         self.cell(col_w[7] + col_w[8], 6, "Saldo", border=1, align='C')
-        
-        # Kondisi Barang
         self.cell(col_w[9], 12, "Kondisi", border=1, align='C')
         
-        # Sub-header Saldo
         self.set_xy(x_saldo, y_start + 6)
         self.cell(col_w[7], 6, "Jumlah", border=1, align='C')
         self.cell(col_w[8], 6, "Nilai (Rp)", border=1, align='C')
 
-        # Reset posisi ke baris berikutnya
         self.set_xy(x_start, y_start + 12)
 
-        # Sub-header Nomor Kolom (1)-(10)
         for i, w in enumerate(col_w):
             self.cell(w, 4, f"({i+1})", border=1, align='C')
         self.ln(4)
 
-        # --- BODY TABEL (24 BARIS) ---
+        # --- BODY TABEL ---
         self.set_font("Arial", '', 7)
         for row in rows_data:
             for i, val in enumerate(row):
-                # Alignment khusus
                 align_code = 'C'
-                if i in [2]: # Keterangan rata kiri
+                if i in [2]: 
                     align_code = 'L'
-                elif i in [3, 4, 5, 6, 7, 8]: # Angka rata kanan
+                elif i in [3, 4, 5, 6, 7, 8]: 
                     align_code = 'R'
 
                 self.cell(col_w[i], 4.5, str(val), border=1, align=align_code)
@@ -91,7 +82,7 @@ class KartuPDF(FPDF):
 st.set_page_config(page_title="Kartu Manual Persediaan", page_icon="⚡", layout="centered")
 
 st.title("⚡ Konverter Kartu Manual Persediaan (Ultra Fast)")
-st.write("Versi paling cepat & ringan. Filter mutasi 0 otomatis dibuang!")
+st.write("Versi kilat + Ekstraksi Header Akurat!")
 
 uploaded_file = st.file_uploader("Upload File PDF Mentah Di Sini", type=["pdf"])
 
@@ -102,37 +93,57 @@ if uploaded_file is not None:
         with st.spinner("Sedang memproses secara instan..."):
             
             pdf_bytes = uploaded_file.read()
+            
+            # Kita panggil pdfplumber & pypdf sekaligus
+            pdf_plumber_obj = pdfplumber.open(io.BytesIO(pdf_bytes))
             reader = PdfReader(io.BytesIO(pdf_bytes))
 
             pdf_out = KartuPDF()
             halaman_lolos = 0
             
-            for page in reader.pages:
+            for idx, page in enumerate(reader.pages):
                 text = page.extract_text() or ""
                 
-                # FILTER 1: Cek transaksi
                 if "Pembelian" in text or "Habis Pakai" in text or "Saldo Awal" in text:
                     
                     nama_barang = "-"
                     kode_barang = "-"
                     satuan = "-"
                     
-                    # Regex Header Extraction
-                    nama_match = re.search(r'Nama\s*Barang\s*:\s*([^:\n]+?)(?=\s*(?:Kode|Satuan|No|Tanggal|\n|$))', text, re.IGNORECASE)
-                    if nama_match:
-                        raw_nama = nama_match.group(1).strip()
-                        raw_nama = re.sub(r'KANTOR\s+IMIGRASI.*$', '', raw_nama, flags=re.IGNORECASE).strip()
-                        if raw_nama:
-                            nama_barang = raw_nama
-
-                    kode_match = re.search(r'Kode\s*Barang\s*:\s*([\d\.]+)', text, re.IGNORECASE)
-                    if kode_match:
-                        kode_barang = kode_match.group(1).strip()
-
-                    satuan_match = re.search(r'Satuan\s*:\s*([A-Za-z0-9]+)', text, re.IGNORECASE)
-                    if satuan_match:
-                        raw_satuan = satuan_match.group(1).strip()
-                        satuan = re.sub(r'SATUAN$', '', raw_satuan, flags=re.IGNORECASE).strip()
+                    # LOGIKA HEADER 1: Pakai pdfplumber khusus bagian atas halaman (pasti akurat & ga telat)
+                    try:
+                        plumber_page = pdf_plumber_obj.pages[idx]
+                        top_text = plumber_page.crop((0, 0, plumber_page.width, 200)).extract_text() or ""
+                        
+                        for line in top_text.split("\n"):
+                            line_clean = line.strip()
+                            if ":" in line_clean:
+                                parts = line_clean.split(":", 1)
+                                label = parts[0].upper()
+                                val = parts[1].strip()
+                                
+                                if "NAMA" in label and "BARANG" in label:
+                                    nama_barang = val
+                                elif "KODE" in label and "BARANG" in label:
+                                    kode_barang = val
+                                elif "SATUAN" in label:
+                                    # Bersihkan kata SATUAN jika nempel di nilai
+                                    satuan = re.sub(r'SATUAN$', '', val, flags=re.IGNORECASE).strip()
+                    except Exception:
+                        pass
+                    
+                    # FALLBACK 2: Jika pdfplumber tetep ga dapet, pake Regex Luas
+                    if nama_barang == "-":
+                        m = re.search(r'Nama\s*Barang\s*:\s*(.+)', text, re.IGNORECASE)
+                        if m: nama_barang = m.group(1).split("Kode")[0].strip()
+                        
+                    if kode_barang == "-":
+                        m = re.search(r'Kode\s*Barang\s*:\s*([\d\.]+)', text, re.IGNORECASE)
+                        if m: kode_barang = m.group(1).strip()
+                        
+                    if satuan == "-":
+                        m = re.search(r'Satuan\s*:\s*([A-Za-z0-9]+)', text, re.IGNORECASE)
+                        if m: satuan = m.group(1).strip()
 
                     lines = [l.strip() for l in text.split("\n") if l.strip()]
 
@@ -206,8 +217,9 @@ if uploaded_file is not None:
                     pdf_out.generate_page(nama_barang, kode_barang, satuan, rows_data)
                     halaman_lolos += 1
 
+            pdf_plumber_obj.close()
+
             if halaman_lolos > 0:
-                # Output PDF ke Bytes Buffer
                 pdf_bytes_output = pdf_out.output()
                 
                 st.balloons()
