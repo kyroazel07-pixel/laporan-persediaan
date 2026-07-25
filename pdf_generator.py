@@ -8,7 +8,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 def build_pdf(pages_data):
     buffer = io.BytesIO()
     
-    # Margin Kiri-Kanan 15 pt -> Lebar area cetak A4 = 595.27 - 30 = 565.27 pt
+    # Margin aman Kiri-Kanan 15pt
     doc = SimpleDocTemplate(
         buffer,
         pagesize=A4,
@@ -37,25 +37,20 @@ def build_pdf(pages_data):
         leading=10
     )
     
-    cell_style = ParagraphStyle(
-        'CellStyle',
+    # Khusus untuk kolom Keterangan saja yang butuh auto-wrap
+    ket_style = ParagraphStyle(
+        'KetStyle',
         parent=styles['Normal'],
         fontName='Helvetica',
         fontSize=6.5,
         leading=8,
         alignment=1 # Center
     )
-    
-    cell_bold = ParagraphStyle(
-        'CellBold',
-        parent=cell_style,
-        fontName='Helvetica-Bold'
-    )
 
     story = []
 
     for idx, item in enumerate(pages_data):
-        # Header
+        # Header Laporan
         story.append(Paragraph("KARTU MANUAL PERSEDIAAN<br/>KANTOR IMIGRASI KELAS II TPI KUALA TUNGKAL", title_style))
         story.append(Spacer(1, 8))
 
@@ -74,51 +69,49 @@ def build_pdf(pages_data):
         story.append(meta_table)
         story.append(Spacer(1, 6))
 
-        # Header Tabel Utama (Dipecah pakai <br/> biar gak bikin crash)
+        # Header Tabel Utama (Pakai String Murni, BUKAN Paragraph, biar anti-crash!)
         table_data = [
             [
-                Paragraph("No", cell_bold), 
-                Paragraph("Tanggal", cell_bold), 
-                Paragraph("Keterangan", cell_bold),
-                Paragraph("Jumlah<br/>Masuk", cell_bold), 
-                Paragraph("Harga<br/>Satuan", cell_bold),
-                Paragraph("Jumlah<br/>Keluar", cell_bold), 
-                Paragraph("Harga<br/>Satuan", cell_bold),
-                Paragraph("Saldo", cell_bold), "", 
-                Paragraph("Kondisi<br/>Barang", cell_bold)
+                "No", "Tanggal", "Keterangan", 
+                "Jumlah\nMasuk", "Harga\nSatuan", 
+                "Jumlah\nKeluar", "Harga\nSatuan", 
+                "Saldo", "", "Kondisi\nBarang"
             ],
             [
                 "", "", "", "", "", "", "",
-                Paragraph("Jumlah", cell_bold), Paragraph("Nilai (Rp)", cell_bold), ""
+                "Jumlah", "Nilai (Rp)", ""
             ],
             [
-                Paragraph("(1)", cell_bold), Paragraph("(2)", cell_bold), Paragraph("(3)", cell_bold),
-                Paragraph("(4)", cell_bold), Paragraph("(5)", cell_bold), Paragraph("(6)", cell_bold),
-                Paragraph("(7)", cell_bold), Paragraph("(8)", cell_bold), Paragraph("(9)", cell_bold),
-                Paragraph("(10)", cell_bold)
+                "(1)", "(2)", "(3)", "(4)", "(5)", 
+                "(6)", "(7)", "(8)", "(9)", "(10)"
             ]
         ]
 
-        # Rows
+        # Isi Baris Transaksi
         no_counter = 1
         for r in item["rows"]:
             table_data.append([
-                Paragraph(str(r['no']), cell_style), Paragraph(str(r['tgl']), cell_style),
-                Paragraph(str(r['ket']), cell_style), Paragraph(str(r['m_jml']), cell_style),
-                Paragraph(str(r['m_hrg']), cell_style), Paragraph(str(r['k_jml']), cell_style),
-                Paragraph(str(r['k_hrg']), cell_style), Paragraph(str(r['s_jml']), cell_style),
-                Paragraph(str(r['s_rp']), cell_style), Paragraph(str(r['kondisi']), cell_style)
+                str(r['no']),
+                str(r['tgl']),
+                Paragraph(str(r['ket']), ket_style), # Cuma Keterangan yang dimasukin Paragraph
+                str(r['m_jml']),
+                str(r['m_hrg']),
+                str(r['k_jml']),
+                str(r['k_hrg']),
+                str(r['s_jml']),
+                str(r['s_rp']),
+                str(r['kondisi'])
             ])
             no_counter += 1
 
         # Pad sampai 24 baris
         while no_counter <= 24:
             table_data.append([
-                Paragraph(str(no_counter), cell_style), "", "", "", "", "", "", "", "", ""
+                str(no_counter), "", "", "", "", "", "", "", "", ""
             ])
             no_counter += 1
 
-        # Total Lebar = 550 pt (Sangat aman dari batas 565 pt)
+        # Ukuran Kolom Presisi Total = 550 pt (Aman banget dari batas 565 pt A4)
         col_widths = [20, 58, 115, 38, 48, 38, 48, 40, 100, 45]
         
         main_table = Table(table_data, colWidths=col_widths, repeatRows=3)
@@ -127,14 +120,19 @@ def build_pdf(pages_data):
             ('GRID', (0,0), (-1,-1), 0.5, colors.black),
             ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
             ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+            ('FONTNAME', (0,0), (-1,-1), 'Helvetica'),
+            ('FONTSIZE', (0,0), (-1,-1), 6.5),
             
-            # Padding diset 0.5 pt biar lega
-            ('LEFTPADDING', (0,0), (-1,-1), 0.5),
-            ('RIGHTPADDING', (0,0), (-1,-1), 0.5),
-            ('TOPPADDING', (0,0), (-1,-1), 1),
-            ('BOTTOMPADDING', (0,0), (-1,-1), 1),
+            # Font Bold khusus untuk 3 baris Header pertama
+            ('FONTNAME', (0,0), (-1,2), 'Helvetica-Bold'),
             
-            # SPAN
+            # Padding internal minimal
+            ('LEFTPADDING', (0,0), (-1,-1), 1),
+            ('RIGHTPADDING', (0,0), (-1,-1), 1),
+            ('TOPPADDING', (0,0), (-1,-1), 1.5),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 1.5),
+            
+            # SPAN Header
             ('SPAN', (0,0), (0,1)),
             ('SPAN', (1,0), (1,1)),
             ('SPAN', (2,0), (2,1)),
