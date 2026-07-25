@@ -10,28 +10,34 @@ st.set_page_config(
 
 st.title("📦 Konverter Kartu Manual Persediaan")
 st.write(
-    "Filter mutasi 0 otomatis dibuang & baris kosong bersih tanpa teks 'Baik'"
-    " nempel!"
+    "Filter mutasi 0 otomatis dibuang, penggabungan barang & kalkulasi saldo"
+    " akurat!"
 )
 
 uploaded_file = st.file_uploader("Upload File PDF Mentah Lu Di Sini", type=["pdf"])
 
 
-def clean_number(val):
-  """Membersihkan angka ganda akibat ekstrak teks bertumpuk"""
+def clean_int(val):
+  """Mengubah string angka PDF (termasuk koma/titik) jadi integer bersih"""
   if not val:
-    return ""
-  val = str(val).strip()
-  # Jika angka berulang seperti 442211 atau tumpuk ganda, usahakan ambil angka bersih
-  # Jika hanya angka biasa, kembalikan string aslinya
-  return val
+    return 0
+  # Ambil hanya digit angka
+  digits = re.sub(r"[^\d]", "", str(val))
+  return int(digits) if digits else 0
+
+
+def format_rupiah(val):
+  """Format integer ke penulisan Rupiah standar (contoh: 1,240,000)"""
+  if not val:
+    return "0"
+  return f"{val:,}"
 
 
 if uploaded_file is not None:
   st.success("File berhasil di-upload, bro!")
 
   if st.button("🚀 PROSES & BERSIHKAN PDF"):
-    with st.spinner("Lagi memproses & menggabungkan data barang..."):
+    with st.spinner("Lagi memproses, menghitung saldo & merapikan data..."):
 
       with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
         tmp_file.write(uploaded_file.read())
@@ -100,8 +106,6 @@ if uploaded_file is not None:
             <body>
             """
 
-      # STRUKTUR DATA: Mengelompokkan berdasarkan Barang
-      # Key: kode_barang / nama_barang
       grouped_items = {}
 
       with pdfplumber.open(tmp_path) as pdf:
@@ -114,7 +118,6 @@ if uploaded_file is not None:
               or "Saldo Awal" in text
           ):
 
-            # Extract Header Info
             nama_barang = "-"
             kode_barang = "-"
             satuan = "-"
@@ -131,7 +134,6 @@ if uploaded_file is not None:
                 if ":" in line:
                   satuan = line.split(":")[-1].strip()
 
-            # Kunci identifikasi unik barang (pakai kode atau nama)
             item_key = (
                 kode_barang if kode_barang != "-" else nama_barang
             ).strip()
@@ -147,11 +149,7 @@ if uploaded_file is not None:
             tables = page.extract_tables()
             if tables:
               for table in tables:
-                row_idx = 0
-                while row_idx < len(table):
-                  row = table[row_idx]
-                  row_idx += 1
-
+                for row in table:
                   if not any(row):
                     continue
 
@@ -161,62 +159,47 @@ if uploaded_file is not None:
                   ]
                   row_str = " ".join(clean_row).lower()
 
-                  # Skip header bawaan
+                  # Skip header & baris footer tidak penting
                   if (
                       "no" in clean_row[0].lower()
                       or "tanggal" in row_str
                       or "keterangan" in row_str
                       or "satuan" in row_str
                       or "unit" in row_str
+                      or clean_row[0].strip().lower() == "saldo"
                   ):
-                    continue
-
-                  # Skip baris saldo penutup bawaan
-                  if clean_row[0].strip().lower() == "saldo":
                     continue
 
                   ket = clean_row[2] if len(clean_row) > 2 else ""
                   tgl = clean_row[1] if len(clean_row) > 1 else ""
 
                   if ket or tgl:
-                    m_jml = clean_row[4] if len(clean_row) > 4 else ""
-                    m_hrg = clean_row[5] if len(clean_row) > 5 else ""
-                    k_jml = clean_row[7] if len(clean_row) > 7 else ""
-                    k_hrg = clean_row[8] if len(clean_row) > 8 else ""
-                    s_jml = clean_row[10] if len(clean_row) > 10 else ""
-                    s_rp = clean_row[11] if len(clean_row) > 11 else ""
+                    m_jml = clean_int(
+                        clean_row[4] if len(clean_row) > 4 else 0
+                    )
+                    m_hrg = clean_int(
+                        clean_row[5] if len(clean_row) > 5 else 0
+                    )
+                    k_jml = clean_int(
+                        clean_row[7] if len(clean_row) > 7 else 0
+                    )
+                    k_hrg = clean_int(
+                        clean_row[8] if len(clean_row) > 8 else 0
+                    )
 
-                    # Intip baris saldo bawahnya kalau terpisah
-                    if row_idx < len(table):
-                      next_row = [
-                          str(c).replace("\n", " ").strip() if c else ""
-                          for c in table[row_idx]
-                      ]
-                      if next_row[0].strip().lower() == "saldo":
-                        if len(next_row) > 11 and next_row[11]:
-                          s_rp = next_row[11]
-                        row_idx += 1
+                    # Ambil angka mentah Saldo Awal jika ini baris Saldo Awal
+                    s_jml_raw = clean_int(
+                        clean_row[10] if len(clean_row) > 10 else 0
+                    )
+                    s_rp_raw = clean_int(
+                        clean_row[11] if len(clean_row) > 11 else 0
+                    )
 
-                    # Perbaikan Pembacaan Kolom Saldo Jumlah (Kolom 8)
-                    # Ambil angka paling bersih (mencegah teks tumpuk ganda)
-                    if s_jml:
-                      # Menghapus duplikasi string jika terdeteksi tumpuk (contoh '1414' atau '442211')
-                      s_jml_clean = clean_number(s_jml)
-                    else:
-                      s_jml_clean = ""
-
-                    if "saldo awal" in ket.lower():
-                      m_hrg = ""
-                      k_jml = ""
-                      k_hrg = ""
-
-                    # Filter jika saldo awal 0 / kosong
-                    chk_s = s_jml_clean.replace(",", "").replace(".", "")
-                    chk_m = m_jml.replace(",", "").replace(".", "")
+                    # Buang jika Saldo Awal nilainya 0 dan tak ada mutasi
                     if (
                         "saldo awal" in ket.lower()
-                        and (chk_s == "0" or chk_s == "")
-                        and (chk_m == "0" or chk_m == "")
+                        and s_jml_raw == 0
+                        and m_jml == 0
                     ):
                       continue
 
@@ -227,38 +210,79 @@ if uploaded_file is not None:
                         "m_hrg": m_hrg,
                         "k_jml": k_jml,
                         "k_hrg": k_hrg,
-                        "s_jml": s_jml_clean,
-                        "s_rp": s_rp,
+                        "s_jml_raw": s_jml_raw,
+                        "s_rp_raw": s_rp_raw,
                     })
 
-      # GENERATE HTML DARI DATA YANG SUDAH DIGABUNG
+      # KALKULASI SALDO OTOMATIS & GENERATE HTML
       halaman_lolos = 0
 
       for item_key, data in grouped_items.items():
         if not data["rows"]:
-          continue  # Skip jika barang tidak ada transaksinya
+          continue
 
         rows_html = ""
         no_counter = 1
 
+        # Variable Tracker Saldo Otomatis
+        running_saldo_qty = 0
+        running_saldo_rp = 0
+        last_known_harga = 0
+
         for r in data["rows"]:
+          ket_lower = r["ket"].lower()
+
+          # 1. Jika Baris Saldo Awal
+          if "saldo awal" in ket_lower:
+            running_saldo_qty = r[
+                "s_jml_raw"
+            ]  # Ambil jumlah awal asli dari PDF
+            running_saldo_rp = r["s_rp_raw"]
+            if running_saldo_qty > 0:
+              last_known_harga = running_saldo_rp // running_saldo_qty
+
+            m_jml_str = (
+                str(r["m_jml"]) if r["m_jml"] > 0 else ""
+            )  # Kadang saldo awal di kolom masuk
+            m_hrg_str = ""
+            k_jml_str = ""
+            k_hrg_str = ""
+
+          # 2. Jika Baris Transaksi Masuk / Keluar
+          else:
+            if r["m_hrg"] > 0:
+              last_known_harga = r["m_hrg"]
+            elif r["k_hrg"] > 0:
+              last_known_harga = r["k_hrg"]
+
+            # Hitung Saldo Baru secara Matematis
+            running_saldo_qty = (
+                running_saldo_qty + r["m_jml"] - r["k_jml"]
+            )
+            running_saldo_rp = running_saldo_qty * last_known_harga
+
+            m_jml_str = str(r["m_jml"]) if r["m_jml"] > 0 else "0"
+            m_hrg_str = format_rupiah(r["m_hrg"]) if r["m_hrg"] > 0 else "0"
+            k_jml_str = str(r["k_jml"]) if r["k_jml"] > 0 else "0"
+            k_hrg_str = format_rupiah(r["k_hrg"]) if r["k_hrg"] > 0 else "0"
+
           rows_html += f"""
                     <tr>
                         <td style="width: 4%;">{no_counter}</td>
                         <td style="width: 11%;">{r['tgl']}</td>
                         <td style="width: 20%;">{r['ket']}</td>
-                        <td style="width: 7%;">{r['m_jml']}</td>
-                        <td style="width: 9%;">{r['m_hrg']}</td>
-                        <td style="width: 7%;">{r['k_jml']}</td>
-                        <td style="width: 9%;">{r['k_hrg']}</td>
-                        <td style="width: 7%;">{r['s_jml']}</td>
-                        <td style="width: 18%;">{r['s_rp']}</td>
+                        <td style="width: 7%;">{m_jml_str}</td>
+                        <td style="width: 9%;">{m_hrg_str}</td>
+                        <td style="width: 7%;">{k_jml_str}</td>
+                        <td style="width: 9%;">{k_hrg_str}</td>
+                        <td style="width: 7%;">{running_saldo_qty}</td>
+                        <td style="width: 18%;">{format_rupiah(running_saldo_rp)}</td>
                         <td style="width: 8%;">Baik</td>
                     </tr>
                     """
           no_counter += 1
 
-        # MINIMAL 24 BARIS PER BARANG (Pelengkap baris kosong)
+        # Isi baris kosong pelengkap sampai 24 baris (kondisi barang kosong)
         while no_counter <= 24:
           rows_html += f"""
                     <tr>
@@ -276,7 +300,6 @@ if uploaded_file is not None:
                     """
           no_counter += 1
 
-        # Render 1 Barang = 1 Halaman PDF Hasil
         html_template += f"""
                 <div class="page">
                     <div class="header-title">
@@ -332,21 +355,21 @@ if uploaded_file is not None:
 
       html_template += "</body></html>"
 
-      pdf_out_path = "Kartu_Manual_Persediaan_Sempurna.pdf"
+      pdf_out_path = "Kartu_Manual_Persediaan_Fixed.pdf"
       HTML(string=html_template).write_pdf(pdf_out_path)
 
       if halaman_lolos > 0:
         st.balloons()
         st.success(
-            f"Selesai! Berhasil menggabungkan menjadi {halaman_lolos} barang"
-            " aktif!"
+            f"Selesai! Berhasil merapikan {halaman_lolos} barang dengan"
+            " kalkulasi saldo akurat!"
         )
 
         with open(pdf_out_path, "rb") as f:
           st.download_button(
-              label="📥 DOWNLOAD PDF PERFECT RESULT",
+              label="📥 DOWNLOAD PDF HASIL BARU",
               data=f,
-              file_name="Kartu_Manual_Persediaan_Perfect.pdf",
+              file_name="Kartu_Manual_Persediaan_Fix.pdf",
               mime="application/pdf",
           )
       else:
