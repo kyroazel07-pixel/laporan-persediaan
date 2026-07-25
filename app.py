@@ -1,126 +1,105 @@
-# app.py
 import streamlit as st
-from processor import process_pdf
+import pdfplumber
+from weasyprint import HTML
+import tempfile
 
-st.set_page_config(
-    page_title="Konverter Kartu Persediaan", 
-    page_icon="📦", 
-    layout="centered"
-)
+st.set_page_config(page_title="Konverter Persediaan", page_icon="📦", layout="centered")
 
-st.markdown("""
-<style>
-    .stApp {
-        background-color: #f8fafc;
-    }
-    .main-card {
-        background: #ffffff;
-        padding: 32px;
-        border-radius: 16px;
-        border: 1px solid #e2e8f0;
-        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05);
-        margin-top: 10px;
-        margin-bottom: 25px;
-    }
-    .header-container {
-        text-align: center;
-        padding-bottom: 20px;
-        border-bottom: 2px dashed #f1f5f9;
-        margin-bottom: 25px;
-    }
-    .header-title {
-        color: #0f172a;
-        font-size: 26px;
-        font-weight: 800;
-        letter-spacing: -0.5px;
-        margin-bottom: 6px;
-    }
-    .header-subtitle {
-        color: #64748b;
-        font-size: 14px;
-    }
-    .badge {
-        background-color: #eff6ff;
-        color: #1d4ed8;
-        font-size: 11px;
-        font-weight: 700;
-        padding: 4px 10px;
-        border-radius: 20px;
-        text-transform: uppercase;
-        display: inline-block;
-        margin-bottom: 10px;
-    }
-    .stButton > button {
-        width: 100%;
-        background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%);
-        color: #ffffff;
-        font-weight: 700;
-        font-size: 15px;
-        padding: 12px 24px;
-        border-radius: 10px;
-        border: none;
-        box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
-    }
-    .download-section {
-        background-color: #f1f5f9;
-        padding: 20px;
-        border-radius: 12px;
-        border: 1px solid #e2e8f0;
-        margin-top: 20px;
-    }
-    .stDownloadButton > button {
-        width: 100%;
-        background-color: #16a34a;
-        color: #ffffff;
-        font-weight: 700;
-        font-size: 14px;
-        border: none;
-        border-radius: 8px;
-        padding: 12px;
-    }
-    .stDownloadButton > button:hover {
-        background-color: #15803d;
-        color: #ffffff;
-    }
-</style>
-""", unsafe_allow_html=True)
+st.title("📦 Konverter Kartu Persediaan Otomatis")
+st.write("Upload PDF mentah dari aplikasi luar, lalu download versi Landscape yang sudah bersih dari barang kosong!")
 
-if "pdf_result" not in st.session_state:
-    st.session_state["pdf_result"] = None
-
-st.markdown('<div class="main-card">', unsafe_allow_html=True)
-
-st.markdown("""
-<div class="header-container">
-    <span class="badge">Sistem Otomatisasi Imigrasi</span>
-    <div class="header-title">📦 Konverter Kartu Persediaan</div>
-    <div class="header-subtitle">Ekstraksi kilat PDF mentah menjadi Kartu Persediaan terformat</div>
-</div>
-""", unsafe_allow_html=True)
-
-uploaded_file = st.file_uploader("Upload PDF Mentah Laporan Lu", type=["pdf"])
+uploaded_file = st.file_uploader("Upload File PDF Mentah Lu Di Sini", type=["pdf"])
 
 if uploaded_file is not None:
-    st.write("")
-    if st.button("⚡ MULAI PROSES KILAT"):
-        with st.spinner("Sedang mengekstrak data & membuat PDF..."):
-            pdf_bytes = process_pdf(uploaded_file)
+    st.success("File berhasil di-upload, bro!")
+    
+    if st.button("🚀 PROSES & BERSIHKAN PDF"):
+        with st.spinner("Lagi memproses & membuang halaman kosong... Tunggu bentar ya!"):
             
-            if pdf_bytes:
-                st.session_state["pdf_result"] = pdf_bytes
-                st.success("✅ Berhasil! File siap diunduh.")
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+                tmp_file.write(uploaded_file.read())
+                tmp_path = tmp_file.name
+
+            html_template = """
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <style>
+                    @page { size: A4 landscape; margin: 15mm; }
+                    body { font-family: Arial, sans-serif; font-size: 9.5pt; }
+                    .page { page-break-after: always; }
+                    .page:last-child { page-break-after: avoid; }
+                    .title { text-align: center; font-size: 14pt; font-weight: bold; margin-bottom: 15px; }
+                    .meta { font-weight: bold; margin-bottom: 10px; font-size: 10pt; }
+                    table { width: 100%; border-collapse: collapse; }
+                    th, td { border: 1px solid #000; padding: 6px; text-align: center; }
+                    th { font-weight: bold; background-color: #f2f2f2; }
+                    .text-left { text-align: left !important; }
+                </style>
+            </head>
+            <body>
+            """
+            
+            halaman_lolos = 0
+            
+            with pdfplumber.open(tmp_path) as pdf:
+                for page in pdf.pages:
+                    text = page.extract_text() or ""
+                    
+                    # FILTER: Membuang halaman yang tidak ada transaksi
+                    if "Pembelian" in text or "Habis Pakai" in text or "Saldo Awal" in text:
+                        lines = text.split("\n")
+                        nama_barang = "BARANG PERSEDIAAN"
+                        for line in lines:
+                            if "NAMA BARANG" in line or "NAMA" in line:
+                                nama_barang = line.replace("NAMA BARANG", "").replace(":", "").strip()
+                        
+                        html_template += f"""
+                        <div class="page">
+                            <div class="title">KARTU PERSEDIAAN BARANG</div>
+                            <div class="meta">NAMA BARANG : {nama_barang}</div>
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th rowspan="2">TANGGAL</th>
+                                        <th rowspan="2">KETERANGAN</th>
+                                        <th colspan="2">PERSEDIAAN MASUK</th>
+                                        <th colspan="2">PERSEDIAAN KELUAR</th>
+                                        <th colspan="2">SALDO</th>
+                                    </tr>
+                                    <tr>
+                                        <th>JUMLAH</th><th>SATUAN</th>
+                                        <th>JUMLAH</th><th>SATUAN</th>
+                                        <th>JUMLAH</th><th>SATUAN</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <td>-</td>
+                                        <td class="text-left">Rincian mutasi terlampir</td>
+                                        <td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        """
+                        halaman_lolos += 1
+            
+            html_template += "</body></html>"
+            
+            pdf_out_path = "Laporan_Persediaan_Landscape_Bersih.pdf"
+            HTML(string=html_template).write_pdf(pdf_out_path)
+            
+            if halaman_lolos > 0:
+                st.balloons()
+                st.success(f"Selesai! Berhasil membuang halaman kosong & menyelamatkan {halaman_lolos} halaman barang ber-transaksi.")
+                
+                with open(pdf_out_path, "rb") as f:
+                    st.download_button(
+                        label="📥 DOWNLOAD PDF HASIL BERSIH",
+                        data=f,
+                        file_name="Laporan_Persediaan_Landscape_Bersih.pdf",
+                        mime="application/pdf"
+                    )
             else:
-                st.error("❌ Tidak ditemukan transaksi bernilai pada file ini.")
-
-if st.session_state["pdf_result"]:
-    st.markdown('<div class="download-section">', unsafe_allow_html=True)
-    st.download_button(
-        label="📥 UNDUH KARTU PERSEDIAAN (PDF)",
-        data=st.session_state["pdf_result"],
-        file_name="Kartu_Persediaan_Hasil.pdf",
-        mime="application/pdf",
-        use_container_width=True
-    )
-    st.markdown('</div>', unsafe_allow_html=True)
-
-st.markdown('</div>', unsafe_allow_html=True)
+                st.error("Nggak ada transaksi valid yang ditemukan di file PDF ini, bro.")
