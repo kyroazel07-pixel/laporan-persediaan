@@ -9,10 +9,10 @@ from reportlab.lib import colors
 
 st.set_page_config(page_title="Konverter Kartu Persediaan SAKTI", layout="wide")
 
-st.title("📄 Generator PDF Kartu Persediaan Manual (Rapi & Sejajar)")
+st.title("📄 Generator PDF Kartu Persediaan Manual (Judul di Tengah)")
 st.markdown(
-    "Pembaruan: Bagian Nama, Kode, dan Satuan Barang kini disejajarkan"
-    " menggunakan tabel tersembunyi agar titik duanya rapi dan cantik."
+    "Pembaruan: Judul 'Buku / Kartu Persediaan Manual' kini posisinya berada di"
+    " tengah halaman dengan tata letak yang sangat rapi."
 )
 
 uploaded_file = st.file_uploader("Pilih file PDF Laporan Persediaan", type=["pdf"])
@@ -144,7 +144,7 @@ def extract_sakti_inventory(pdf_file):
 
 
 if uploaded_file is not None:
-  if st.button("🚀 Generate PDF Super Rapi & Cantik"):
+  if st.button("🚀 Generate PDF Judul di Tengah"):
     with st.spinner("Memproses dokumen..."):
       all_inventory_data = extract_sakti_inventory(uploaded_file)
 
@@ -161,12 +161,14 @@ if uploaded_file is not None:
       story = []
       styles = getSampleStyleSheet()
 
+      # Style khusus judul di tengah (alignment=1)
       title_style = ParagraphStyle(
-          'CardTitle',
+          'CardTitleCenter',
           parent=styles['Normal'],
           fontName='Helvetica-Bold',
-          fontSize=10,
-          leading=12,
+          fontSize=11,
+          leading=13,
+          alignment=1,
       )
       meta_label_style = ParagraphStyle(
           'MetaLabel',
@@ -213,13 +215,13 @@ if uploaded_file is not None:
         if not rows:
           continue
 
-        # Judul Kartu
+        # Judul Kartu di Tengah
         story.append(
             Paragraph("<b>Buku / Kartu Persediaan Manual</b>", title_style)
         )
-        story.append(Spacer(1, 3))
+        story.append(Spacer(1, 6))
 
-        # Tabel Identitas Barang (Agar titik dua lurus sejajar sempurna)
+        # Tabel Identitas Barang (Sejajar & Rapi)
         meta_data = [
             [
                 Paragraph("Nama Barang", meta_label_style),
@@ -314,10 +316,10 @@ if uploaded_file is not None:
       doc.build(story)
       pdf_data = pdf_buffer.getvalue()
 
-      st.success("Berhasil! PDF Super Rapi & Cantik siap diunduh.")
+      st.success("Berhasil! PDF dengan judul di tengah siap diunduh.")
       st.download_button(
-          label="📥 Download PDF Kartu Persediaan Cantik",
+          label="📥 Download PDF Kartu Persediaan",
           data=pdf_data,
-          file_name="Kartu_Persediaan_Manual_Cantik.pdf",
+          file_name="Kartu_Persediaan_Manual_Tengah.pdf",
           mime="application/pdf",
       )
