@@ -7,19 +7,18 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 from reportlab.lib import colors
 
-st.set_page_config(page_title="Konverter Kartu Persediaan Manual", layout="wide")
+st.set_page_config(page_title="Konverter Kartu Persediaan SAKTI", layout="wide")
 
-st.title("📄 Generator PDF Kartu Persediaan Manual (Portrait - Final)")
+st.title("📄 Generator PDF Kartu Persediaan Manual (Sesuai Baris SAKTI)")
 st.markdown(
-    "Pembaruan pada indeks kolom **Saldo Nilai (Rp)** agar mengambil total"
-    " nominal rupiah yang benar dari laporan SAKTI, serta penyesuaian lebar"
-    " kolom agar tulisan tidak turun."
+    "Aplikasi akan menyalin langsung baris transaksi (termasuk multi-layer"
+    " saldo harga berbeda) persis seperti format laporan SAKTI."
 )
 
 uploaded_file = st.file_uploader("Pilih file PDF Laporan Persediaan", type=["pdf"])
 
 
-def extract_and_merge_inventory(pdf_file):
+def extract_sakti_inventory(pdf_file):
   items_dict = {}
 
   with pdfplumber.open(pdf_file) as pdf:
@@ -65,13 +64,13 @@ def extract_and_merge_inventory(pdf_file):
               cell.replace("\n", " ").strip() if cell else "" for cell in row
           ]
 
-          # Pastikan baris memiliki kolom data transaksi yang lengkap
           if len(cleaned) >= 12:
             no_raw = cleaned[0]
             tgl = cleaned[1]
             ket = cleaned[2]
             no_dok = cleaned[3] if len(cleaned) > 3 else ""
 
+            # Lewati baris header tabel berulang atau baris biru saldo
             if (
                 "No" in no_raw
                 or "Tanggal" in tgl
@@ -85,29 +84,20 @@ def extract_and_merge_inventory(pdf_file):
             else:
               ket_full = ket
 
-            # Ambil data transaksi Masuk & Keluar
+            # Ambil data persis sesuai kolom SAKTI
             jml_masuk = cleaned[4] if len(cleaned) > 4 else "0"
             hrg_masuk = cleaned[5] if len(cleaned) > 5 else "0"
             jml_keluar = cleaned[7] if len(cleaned) > 7 else "0"
             hrg_keluar = cleaned[8] if len(cleaned) > 8 else "0"
 
-            # Ambil Saldo Unit dan Total Saldo Nilai (Rupiah) yang benar
+            # Kolom Saldo Persediaan (Unit, Harga, Jumlah Total)
             saldo_unit = cleaned[10] if len(cleaned) > 10 else "0"
-            # Indeks 12 adalah total nilai rupiah pada laporan SAKTI
+            saldo_harga = cleaned[11] if len(cleaned) > 11 else "0"
             saldo_nilai = (
                 cleaned[12]
                 if len(cleaned) > 12
                 else (cleaned[11] if len(cleaned) > 11 else "0")
             )
-
-            # Harga satuan aktif
-            harga_satuan = (
-                hrg_masuk
-                if hrg_masuk not in ["", "0", "0.00", "-"]
-                else hrg_keluar
-            )
-            if not harga_satuan or harga_satuan in ["", "-"]:
-              harga_satuan = "0"
 
             if (
                 no_raw.isdigit()
@@ -116,13 +106,15 @@ def extract_and_merge_inventory(pdf_file):
                 or "Habis" in ket
             ):
               items_dict[current_kode]["rows"].append({
+                  "No": no_raw,
                   "Tanggal": tgl,
                   "Keterangan": ket_full,
                   "Jumlah Masuk": jml_masuk,
-                  "Harga Satuan": harga_satuan,
+                  "Harga Masuk": hrg_masuk,
                   "Jumlah Keluar": jml_keluar,
-                  "Harga Satuan Keluar": harga_satuan,
-                  "Saldo Jumlah": saldo_unit,
+                  "Harga Keluar": hrg_keluar,
+                  "Saldo Unit": saldo_unit,
+                  "Saldo Harga": saldo_harga,
                   "Saldo Nilai": saldo_nilai,
                   "Kondisi Barang": "Baik (B)",
               })
@@ -134,12 +126,11 @@ def extract_and_merge_inventory(pdf_file):
 
 
 if uploaded_file is not None:
-  if st.button("🚀 Generate PDF Final (Portrait & Akurat)"):
-    with st.spinner("Sedang menyusun PDF..."):
-      all_inventory_data = extract_and_merge_inventory(uploaded_file)
+  if st.button("🚀 Generate PDF Sesuai Baris SAKTI"):
+    with st.spinner("Sedang memproses dokumen..."):
+      all_inventory_data = extract_sakti_inventory(uploaded_file)
 
       pdf_buffer = io.BytesIO()
-      # Orientasi Portrait A4 dengan margin optimal (20 pt)
       doc = SimpleDocTemplate(
           pdf_buffer,
           pagesize=A4,
@@ -208,7 +199,7 @@ if uploaded_file is not None:
         )
         story.append(Spacer(1, 5))
 
-        # Tabel 10 Kolom
+        # Tabel 10 Kolom Format Manual
         table_data = [
             [
                 Paragraph("<b>No</b>", header_cell_style),
@@ -236,21 +227,20 @@ if uploaded_file is not None:
             ],
         ]
 
-        for i, r in enumerate(rows, start=1):
+        for r in rows:
           table_data.append([
-              Paragraph(str(i), center_style),
+              Paragraph(str(r["No"]), center_style),
               Paragraph(str(r["Tanggal"]), center_style),
               Paragraph(str(r["Keterangan"]), normal_style),
               Paragraph(str(r["Jumlah Masuk"]), center_style),
-              Paragraph(str(r["Harga Satuan"]), center_style),
+              Paragraph(str(r["Harga Masuk"]), center_style),
               Paragraph(str(r["Jumlah Keluar"]), center_style),
-              Paragraph(str(r["Harga Satuan Keluar"]), center_style),
-              Paragraph(str(r["Saldo Jumlah"]), center_style),
+              Paragraph(str(r["Harga Keluar"]), center_style),
+              Paragraph(str(r["Saldo Unit"]), center_style),
               Paragraph(str(r["Saldo Nilai"]), center_style),
               Paragraph(str(r["Kondisi Barang"]), center_style),
           ])
 
-        # Lebar proporsional pas untuk A4 Portrait (Total ~555 pt) agar teks tidak turun
         col_widths = [22, 52, 135, 45, 55, 45, 55, 45, 65, 37]
         t = Table(table_data, colWidths=col_widths, repeatRows=2)
         t.setStyle(
@@ -272,10 +262,10 @@ if uploaded_file is not None:
       doc.build(story)
       pdf_data = pdf_buffer.getvalue()
 
-      st.success("Berhasil! PDF Final siap diunduh.")
+      st.success("Berhasil! PDF Sesuai Baris SAKTI siap diunduh.")
       st.download_button(
-          label="📥 Download PDF Kartu Persediaan Final",
+          label="📥 Download PDF Kartu Persediaan SAKTI",
           data=pdf_data,
-          file_name="Kartu_Persediaan_Manual_Final.pdf",
+          file_name="Kartu_Persediaan_SAKTI_Manual.pdf",
           mime="application/pdf",
       )
