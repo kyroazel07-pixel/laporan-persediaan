@@ -9,10 +9,10 @@ from reportlab.lib import colors
 
 st.set_page_config(page_title="Konverter Kartu Persediaan SAKTI", layout="wide")
 
-st.title("📄 Generator PDF Kartu Persediaan Manual (Lengkap & Baris Jumlah)")
+st.title("📄 Generator PDF Kartu Persediaan Manual (Fix Kolom Rapi)")
 st.markdown(
-    "Pembaruan: Memperbaiki pembacaan transaksi baris ke-36 agar tidak terlewat,"
-    " serta menambahkan baris total/jumlah di bagian bawah tabel."
+    "Pembaruan: Menghapus baris jumlah di bawah serta menyelaraskan kolom"
+    " transaksi Masuk dan Keluar agar tidak kosong."
 )
 
 uploaded_file = st.file_uploader("Pilih file PDF Laporan Persediaan", type=["pdf"])
@@ -74,6 +74,7 @@ def extract_sakti_inventory(pdf_file):
               cell.replace("\n", " ").strip() if cell else "" for cell in row
           ]
 
+          # SAKTI standar tabel rincian memiliki minimal 12 kolom
           if len(cleaned) >= 12:
             no_raw = cleaned[0]
             tgl = cleaned[1]
@@ -93,15 +94,20 @@ def extract_sakti_inventory(pdf_file):
             else:
               ket_full = ket
 
-            jml_masuk = cleaned[4] if len(cleaned) > 4 else "0"
+            # Ambil data transaksi Masuk (Unit, Harga)
+            jml_masuk_unit = cleaned[4] if len(cleaned) > 4 else "0"
             hrg_masuk = cleaned[5] if len(cleaned) > 5 else "0"
-            jml_keluar = cleaned[7] if len(cleaned) > 7 else "0"
+
+            # Ambil data transaksi Keluar (Unit, Harga)
+            jml_keluar_unit = cleaned[7] if len(cleaned) > 7 else "0"
             hrg_keluar = cleaned[8] if len(cleaned) > 8 else "0"
 
+            # Ambil Saldo Persediaan (Unit dan Total Nilai Rupiah)
             saldo_unit = cleaned[10] if len(cleaned) > 10 else "0"
             saldo_harga = cleaned[11] if len(cleaned) > 11 else "0"
             saldo_nilai = cleaned[12] if len(cleaned) > 12 else "0"
 
+            # Jika baris transaksi valid
             if (
                 no_raw.isdigit()
                 or "Saldo Awal" in ket
@@ -113,12 +119,11 @@ def extract_sakti_inventory(pdf_file):
                   "No": no_raw if no_raw else "",
                   "Tanggal": tgl,
                   "Keterangan": ket_full,
-                  "Jumlah Masuk": jml_masuk,
-                  "Harga Masuk": hrg_masuk,
-                  "Jumlah Keluar": jml_keluar,
-                  "Harga Keluar": hrg_keluar,
+                  "Jumlah Masuk": clean_stacked_text(jml_masuk_unit),
+                  "Harga Masuk": clean_stacked_text(hrg_masuk),
+                  "Jumlah Keluar": clean_stacked_text(jml_keluar_unit),
+                  "Harga Keluar": clean_stacked_text(hrg_keluar),
                   "Saldo Unit": clean_stacked_text(saldo_unit),
-                  "Saldo Harga": clean_stacked_text(saldo_harga),
                   "Saldo Nilai": clean_stacked_text(saldo_nilai),
                   "Kondisi Barang": "Baik (B)",
               })
@@ -126,7 +131,7 @@ def extract_sakti_inventory(pdf_file):
     progress_bar.empty()
     status_text.empty()
 
-  # Filter cerdas: Hapus hanya barang yang benar-benar tidak ada transaksi (hanya baris 0 saldo awal)
+  # Filter cerdas: Hapus barang dengan saldo awal 0 tanpa transaksi lanjutan
   filtered_items = []
   for item in list(items_dict.values()):
     rows = item["rows"]
@@ -144,7 +149,7 @@ def extract_sakti_inventory(pdf_file):
 
 
 if uploaded_file is not None:
-  if st.button("🚀 Generate PDF Lengkap dengan Baris Jumlah"):
+  if st.button("🚀 Generate PDF Bersih & Rapi"):
     with st.spinner("Memproses dokumen..."):
       all_inventory_data = extract_sakti_inventory(uploaded_file)
 
@@ -208,14 +213,6 @@ if uploaded_file is not None:
           leading=7.5,
           alignment=1,
       )
-      table_footer_style = ParagraphStyle(
-          'TableFooter',
-          parent=styles['Normal'],
-          fontName='Helvetica-Bold',
-          fontSize=5.8,
-          leading=7.5,
-          alignment=1,
-      )
 
       for idx, item in enumerate(all_inventory_data):
         rows = item["rows"]
@@ -260,7 +257,7 @@ if uploaded_file is not None:
         story.append(meta_table)
         story.append(Spacer(1, 6))
 
-        # Tabel Transaksi 10 Kolom
+        # Tabel Transaksi 10 Kolom (Tanpa baris jumlah di bawah)
         table_data = [
             [
                 Paragraph("<b>No</b>", table_header_style),
@@ -288,9 +285,6 @@ if uploaded_file is not None:
             ],
         ]
 
-        total_masuk_sum = 0
-        total_keluar_sum = 0
-
         for r in rows:
           table_data.append([
               Paragraph(str(r["No"]), table_cell_style),
@@ -305,41 +299,11 @@ if uploaded_file is not None:
               Paragraph(str(r["Kondisi Barang"]), table_cell_style),
           ])
 
-          # Hitung total keluar untuk baris ringkasan bawah
-          try:
-            val_k = int(str(r["Jumlah Keluar"]).replace(",", ""))
-            total_keluar_sum += val_k
-          except:
-            pass
-
-        # Tambahkan Baris "Jumlah" di bagian bawah tabel persis seperti contoh SAKTI
-        last_saldo = rows[-1]["Saldo Unit"] if rows else "0"
-        table_data.append([
-            Paragraph("<b>Jumlah</b>", table_footer_style),
-            Paragraph("", table_footer_style),
-            Paragraph("", table_footer_style),
-            Paragraph("<b>0</b>", table_footer_style),
-            Paragraph("", table_footer_style),
-            Paragraph(f"<b>{total_keluar_sum}</b>", table_footer_style),
-            Paragraph("", table_footer_style),
-            Paragraph(f"<b>{last_saldo}</b>", table_footer_style),
-            Paragraph("", table_footer_style),
-            Paragraph("", table_footer_style),
-        ])
-
         col_widths = [20, 48, 145, 45, 58, 45, 58, 48, 62, 39]
         t = Table(table_data, colWidths=col_widths, repeatRows=2)
-
-        # Style tabel termasuk mewarnai baris footer 'Jumlah' dengan warna abu-abu sama seperti header
         t.setStyle(
             TableStyle([
                 ("BACKGROUND", (0, 0), (-1, 1), colors.lightgrey),
-                (
-                    "BACKGROUND",
-                    (0, -1),
-                    (-1, -1),
-                    colors.lightgrey,
-                ),  # Warna baris jumlah di bawah
                 ("ALIGN", (0, 0), (-1, -1), "CENTER"),
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                 ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
@@ -356,10 +320,10 @@ if uploaded_file is not None:
       doc.build(story)
       pdf_data = pdf_buffer.getvalue()
 
-      st.success("Berhasil! PDF lengkap dengan baris jumlah siap diunduh.")
+      st.success("Berhasil! PDF Kartu Persediaan siap diunduh.")
       st.download_button(
-          label="📥 Download PDF Kartu Persediaan Lengkap",
+          label="📥 Download PDF Kartu Persediaan",
           data=pdf_data,
-          file_name="Kartu_Persediaan_Manual_Lengkap.pdf",
+          file_name="Kartu_Persediaan_Manual_Bersih.pdf",
           mime="application/pdf",
       )
