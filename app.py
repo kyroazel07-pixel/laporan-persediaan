@@ -9,10 +9,10 @@ from reportlab.lib import colors
 
 st.set_page_config(page_title="Konverter Kartu Persediaan SAKTI", layout="wide")
 
-st.title("📄 Generator PDF Kartu Persediaan Manual (Fix Kolom Keluar)")
+st.title("📄 Generator PDF Kartu Persediaan Manual (Murni Sesuai SAKTI)")
 st.markdown(
-    "Pembaruan: Memperbaiki pemetaan kolom transaksi Keluar (Unit & Harga)"
-    " agar tidak kosong."
+    "Aplikasi menyalin data transaksi per barang secara murni dan presisi"
+    " tanpa mengubah atau menebak-nebak angka."
 )
 
 uploaded_file = st.file_uploader("Pilih file PDF Laporan Persediaan", type=["pdf"])
@@ -21,6 +21,7 @@ uploaded_file = st.file_uploader("Pilih file PDF Laporan Persediaan", type=["pdf
 def clean_stacked_text(text):
   if not text:
     return ""
+  # Merapikan angka multi-layer agar tersusun ke bawah secara vertikal
   cleaned = re.sub(r"\s+", " ", str(text)).strip()
   parts = cleaned.split(" ")
   if len(parts) > 1:
@@ -74,13 +75,14 @@ def extract_sakti_inventory(pdf_file):
               cell.replace("\n", " ").strip() if cell else "" for cell in row
           ]
 
-          # SAKTI standar tabel rincian memiliki minimal 12 kolom
-          if len(cleaned) >= 12:
+          # Pastikan baris memiliki kolom yang cukup sesuai struktur SAKTI
+          if len(cleaned) >= 11:
             no_raw = cleaned[0]
             tgl = cleaned[1]
             ket = cleaned[2]
             no_dok = cleaned[3] if len(cleaned) > 3 else ""
 
+            # Lewati baris header tabel
             if (
                 "No" in no_raw
                 or "Tanggal" in tgl
@@ -94,45 +96,24 @@ def extract_sakti_inventory(pdf_file):
             else:
               ket_full = ket
 
-            # Pemetaan indeks kolom SAKTI yang lebih fleksibel & akurat
-            # Masuk (Unit di 4/5, Harga di 5/6)
-            jml_masuk_unit = cleaned[4] if len(cleaned) > 4 else "0"
-            hrg_masuk = cleaned[5] if len(cleaned) > 5 else "0"
-            if jml_masuk_unit == "" and len(cleaned) > 5:
-              jml_masuk_unit = cleaned[5]
-              hrg_masuk = cleaned[6] if len(cleaned) > 6 else "0"
+            # Ambil persis sesuai indeks asli SAKTI
+            # Masuk
+            m_unit = cleaned[4] if len(cleaned) > 4 else "0"
+            m_harga = cleaned[5] if len(cleaned) > 5 else "0"
 
-            # Keluar (Unit biasanya di index 7 atau 8, Harga di 8 atau 9)
-            jml_keluar_unit = "0"
-            hrg_keluar = "0"
-            for idx_col in [7, 6, 8]:
-              if (
-                  idx_col < len(cleaned)
-                  and cleaned[idx_col]
-                  and cleaned[idx_col] != "0"
-                  and not cleaned[idx_col].replace(",", "").isdigit() is False
-              ):
-                # Cek apakah ini angka unit keluar (biasanya kecil < 1000)
-                val_test = cleaned[idx_col].replace(",", "")
-                if val_test.isdigit() and int(val_test) < 10000:
-                  jml_keluar_unit = cleaned[idx_col]
-                  if idx_col + 1 < len(cleaned):
-                    hrg_keluar = cleaned[idx_col + 1]
-                  break
+            # Keluar
+            k_unit = cleaned[7] if len(cleaned) > 7 else "0"
+            k_harga = cleaned[8] if len(cleaned) > 8 else "0"
 
-            # Fallback posisi standar SAKTI jika pencarian dinamis kosong
-            if jml_keluar_unit == "0" and len(cleaned) > 7:
-              jml_keluar_unit = cleaned[7] if cleaned[7] else "0"
-              hrg_keluar = (
-                  cleaned[8]
-                  if len(cleaned) > 8 and cleaned[8]
-                  else "0"
-              )
+            # Saldo Persediaan (Unit dan Nilai Rupiah Total)
+            s_unit = cleaned[10] if len(cleaned) > 10 else "0"
+            s_nilai = (
+                cleaned[12]
+                if len(cleaned) > 12
+                else (cleaned[11] if len(cleaned) > 11 else "0")
+            )
 
-            # Saldo Persediaan (Unit di belakang, Nilai Total di ujung)
-            saldo_unit = cleaned[10] if len(cleaned) > 10 else "0"
-            saldo_nilai = cleaned[12] if len(cleaned) > 12 else (cleaned[11] if len(cleaned) > 11 else "0")
-
+            # Tangkap semua baris transaksi yang valid
             if (
                 no_raw.isdigit()
                 or "Saldo Awal" in ket
@@ -144,18 +125,19 @@ def extract_sakti_inventory(pdf_file):
                   "No": no_raw if no_raw else "",
                   "Tanggal": tgl,
                   "Keterangan": ket_full,
-                  "Jumlah Masuk": clean_stacked_text(jml_masuk_unit),
-                  "Harga Masuk": clean_stacked_text(hrg_masuk),
-                  "Jumlah Keluar": clean_stacked_text(jml_keluar_unit),
-                  "Harga Keluar": clean_stacked_text(hrg_keluar),
-                  "Saldo Unit": clean_stacked_text(saldo_unit),
-                  "Saldo Nilai": clean_stacked_text(saldo_nilai),
+                  "Jumlah Masuk": clean_stacked_text(m_unit),
+                  "Harga Masuk": clean_stacked_text(m_harga),
+                  "Jumlah Keluar": clean_stacked_text(k_unit),
+                  "Harga Keluar": clean_stacked_text(k_harga),
+                  "Saldo Unit": clean_stacked_text(s_unit),
+                  "Saldo Nilai": clean_stacked_text(s_nilai),
                   "Kondisi Barang": "Baik (B)",
               })
 
     progress_bar.empty()
     status_text.empty()
 
+  # Filter: Hapus barang dengan saldo awal 0 murni tanpa transaksi lanjutan
   filtered_items = []
   for item in list(items_dict.values()):
     rows = item["rows"]
@@ -173,7 +155,7 @@ def extract_sakti_inventory(pdf_file):
 
 
 if uploaded_file is not None:
-  if st.button("🚀 Generate PDF Sempurna (Fix Kolom Keluar)"):
+  if st.button("🚀 Generate PDF Murni Sesuai SAKTI"):
     with st.spinner("Memproses dokumen..."):
       all_inventory_data = extract_sakti_inventory(uploaded_file)
 
@@ -243,11 +225,13 @@ if uploaded_file is not None:
         if not rows:
           continue
 
+        # Judul di Tengah
         story.append(
             Paragraph("<b>Buku / Kartu Persediaan Manual</b>", title_style)
         )
         story.append(Spacer(1, 6))
 
+        # Tabel Identitas Barang Sejajar
         meta_data = [
             [
                 Paragraph("Nama Barang", meta_label_style),
@@ -279,6 +263,7 @@ if uploaded_file is not None:
         story.append(meta_table)
         story.append(Spacer(1, 6))
 
+        # Tabel Transaksi 10 Kolom
         table_data = [
             [
                 Paragraph("<b>No</b>", table_header_style),
@@ -341,10 +326,10 @@ if uploaded_file is not None:
       doc.build(story)
       pdf_data = pdf_buffer.getvalue()
 
-      st.success("Berhasil! PDF Kartu Persediaan siap diunduh.")
+      st.success("Berhasil! PDF murni sesuai SAKTI siap diunduh.")
       st.download_button(
-          label="📥 Download PDF Kartu Persediaan",
+          label="📥 Download PDF Kartu Persediaan Murni",
           data=pdf_data,
-          file_name="Kartu_Persediaan_Manual_Fixed.pdf",
+          file_name="Kartu_Persediaan_Manual_Murni.pdf",
           mime="application/pdf",
       )
