@@ -9,10 +9,11 @@ from reportlab.lib import colors
 
 st.set_page_config(page_title="Konverter Kartu Persediaan SAKTI", layout="wide")
 
-st.title("📄 Generator PDF Kartu Persediaan Manual (Sesuai Baris SAKTI)")
+st.title("📄 Generator PDF Kartu Persediaan Manual (Akurat & Rapi)")
 st.markdown(
-    "Aplikasi akan menyalin langsung baris transaksi (termasuk multi-layer"
-    " saldo harga berbeda) persis seperti format laporan SAKTI."
+    "Aplikasi disempurnakan untuk memunculkan baris nomor **1 (Saldo Awal)**"
+    " serta menyusun multi-layer saldo ke bawah secara vertikal persis seperti"
+    " laporan SAKTI."
 )
 
 uploaded_file = st.file_uploader("Pilih file PDF Laporan Persediaan", type=["pdf"])
@@ -57,6 +58,7 @@ def extract_sakti_inventory(pdf_file):
             "rows": [],
         }
 
+      # Ekstraksi tabel menggunakan pdfplumber
       tables = page.extract_tables()
       for table in tables:
         for row in table:
@@ -70,12 +72,12 @@ def extract_sakti_inventory(pdf_file):
             ket = cleaned[2]
             no_dok = cleaned[3] if len(cleaned) > 3 else ""
 
-            # Lewati baris header tabel berulang atau baris biru saldo
+            # Lewati baris header tabel yang berulang
             if (
                 "No" in no_raw
                 or "Tanggal" in tgl
                 or "Keterangan" in ket
-                or "Saldo" in ket
+                and "Saldo" in ket
             ):
               continue
 
@@ -84,29 +86,27 @@ def extract_sakti_inventory(pdf_file):
             else:
               ket_full = ket
 
-            # Ambil data persis sesuai kolom SAKTI
+            # Ambil data transaksi Masuk & Keluar
             jml_masuk = cleaned[4] if len(cleaned) > 4 else "0"
             hrg_masuk = cleaned[5] if len(cleaned) > 5 else "0"
             jml_keluar = cleaned[7] if len(cleaned) > 7 else "0"
             hrg_keluar = cleaned[8] if len(cleaned) > 8 else "0"
 
-            # Kolom Saldo Persediaan (Unit, Harga, Jumlah Total)
+            # Ambil data Saldo Persediaan (mendukung multi-layer berderet ke bawah di PDF)
             saldo_unit = cleaned[10] if len(cleaned) > 10 else "0"
             saldo_harga = cleaned[11] if len(cleaned) > 11 else "0"
-            saldo_nilai = (
-                cleaned[12]
-                if len(cleaned) > 12
-                else (cleaned[11] if len(cleaned) > 11 else "0")
-            )
+            saldo_nilai = cleaned[12] if len(cleaned) > 12 else "0"
 
+            # Tangkap baris transaksi valid (termasuk nomor 1 Saldo Awal dan baris-baris lanjutannya)
             if (
                 no_raw.isdigit()
                 or "Saldo Awal" in ket
                 or "Pembelian" in ket
                 or "Habis" in ket
+                or "Reklasifikasi" in ket
             ):
               items_dict[current_kode]["rows"].append({
-                  "No": no_raw,
+                  "No": no_raw if no_raw else "",
                   "Tanggal": tgl,
                   "Keterangan": ket_full,
                   "Jumlah Masuk": jml_masuk,
@@ -126,7 +126,7 @@ def extract_sakti_inventory(pdf_file):
 
 
 if uploaded_file is not None:
-  if st.button("🚀 Generate PDF Sesuai Baris SAKTI"):
+  if st.button("🚀 Generate PDF Sempurna (Nomor 1 & Stacked Rows)"):
     with st.spinner("Sedang memproses dokumen..."):
       all_inventory_data = extract_sakti_inventory(uploaded_file)
 
@@ -228,6 +228,11 @@ if uploaded_file is not None:
         ]
 
         for r in rows:
+          # Ubah pemisah baris newline menjadi tag <br/> agar teks multi-layer tersusun ke bawah secara rapi
+          s_unit = str(r["Saldo Unit"]).replace("\n", "<br/>")
+          s_harga = str(r["Saldo Harga"]).replace("\n", "<br/>")
+          s_nilai = str(r["Saldo Nilai"]).replace("\n", "<br/>")
+
           table_data.append([
               Paragraph(str(r["No"]), center_style),
               Paragraph(str(r["Tanggal"]), center_style),
@@ -236,8 +241,8 @@ if uploaded_file is not None:
               Paragraph(str(r["Harga Masuk"]), center_style),
               Paragraph(str(r["Jumlah Keluar"]), center_style),
               Paragraph(str(r["Harga Keluar"]), center_style),
-              Paragraph(str(r["Saldo Unit"]), center_style),
-              Paragraph(str(r["Saldo Nilai"]), center_style),
+              Paragraph(s_unit, center_style),
+              Paragraph(s_nilai, center_style),
               Paragraph(str(r["Kondisi Barang"]), center_style),
           ])
 
@@ -262,10 +267,10 @@ if uploaded_file is not None:
       doc.build(story)
       pdf_data = pdf_buffer.getvalue()
 
-      st.success("Berhasil! PDF Sesuai Baris SAKTI siap diunduh.")
+      st.success("Berhasil! PDF Sempurna siap diunduh.")
       st.download_button(
-          label="📥 Download PDF Kartu Persediaan SAKTI",
+          label="📥 Download PDF Kartu Persediaan Sempurna",
           data=pdf_data,
-          file_name="Kartu_Persediaan_SAKTI_Manual.pdf",
+          file_name="Kartu_Persediaan_Manual_Sempurna.pdf",
           mime="application/pdf",
       )
