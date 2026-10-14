@@ -2,23 +2,21 @@ import io
 import re
 import pdfplumber
 import streamlit as st
-from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-from reportlab.platypus import HRFlowable, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 from reportlab.lib import colors
 
-st.set_page_config(page_title="Konverter Kartu Persediaan ke PDF", layout="wide")
+st.set_page_config(page_title="Konverter Kartu Persediaan Manual", layout="wide")
 
-st.title("📄 Generator PDF Kartu Persediaan Manual BMN")
+st.title("📄 Generator PDF Kartu Persediaan Manual (Portrait)")
 st.markdown(
-    "Unggah PDF Laporan SAKTI/SIMAN (300+ halaman). Aplikasi akan merunut"
-    " transaksi multi-halaman dan mencetaknya langsung ke dalam format **PDF"
-    " Kartu Persediaan Manual**."
+    "Aplikasi memperbarui format menjadi **Portrait (Tegak)** serta menarik"
+    " kolom **Saldo Nilai (Rp)** secara akurat sesuai total nilai rupiah"
+    " laporan SAKTI."
 )
 
-uploaded_file = st.file_uploader(
-    "Pilih file PDF Laporan Persediaan SAKTI/SIMAN", type=["pdf"]
-)
+uploaded_file = st.file_uploader("Pilih file PDF Laporan Persediaan", type=["pdf"])
 
 
 def extract_and_merge_inventory(pdf_file):
@@ -86,13 +84,19 @@ def extract_and_merge_inventory(pdf_file):
             else:
               ket_full = ket
 
+            # Ambil data transaksi masuk/keluar
             jml_masuk = cleaned[4] if len(cleaned) > 4 else "0"
             hrg_masuk = cleaned[5] if len(cleaned) > 5 else "0"
             jml_keluar = cleaned[7] if len(cleaned) > 7 else "0"
             hrg_keluar = cleaned[8] if len(cleaned) > 8 else "0"
-            saldo_unit = cleaned[10] if len(cleaned) > 10 else "0"
-            saldo_nilai = cleaned[11] if len(cleaned) > 11 else "0"
 
+            # Ambil Saldo Unit dan Saldo Nilai Total dari laporan asal
+            saldo_unit = cleaned[10] if len(cleaned) > 10 else "0"
+            saldo_nilai = (
+                cleaned[11] if len(cleaned) > 11 else "0"
+            )  # Kolom nilai total rupiah
+
+            # Harga satuan ambil dari harga masuk atau harga keluar yang valid
             harga_satuan = (
                 hrg_masuk
                 if hrg_masuk not in ["", "0", "0.00", "-"]
@@ -115,7 +119,7 @@ def extract_and_merge_inventory(pdf_file):
                   "Jumlah Keluar": jml_keluar,
                   "Harga Satuan Keluar": harga_satuan,
                   "Saldo Jumlah": saldo_unit,
-                  "Saldo Nilai": saldo_nilai,
+                  "Saldo Nilai": saldo_nilai,  # Nilai total rupiah yang benar
                   "Kondisi Barang": "Baik (B)",
               })
 
@@ -126,20 +130,19 @@ def extract_and_merge_inventory(pdf_file):
 
 
 if uploaded_file is not None:
-  if st.button("🚀 Generate Dokumen PDF Kartu Persediaan"):
-    with st.spinner("Sedang memproses dan menyusun halaman PDF..."):
+  if st.button("🚀 Generate PDF Format Portrait"):
+    with st.spinner("Sedang menyusun PDF Portrait..."):
       all_inventory_data = extract_and_merge_inventory(uploaded_file)
 
-      # Buat file PDF di memori
       pdf_buffer = io.BytesIO()
-      # Gunakan orientasi Landscape (mendatar) agar 10 kolom muat dengan sangat leluasa
+      # Menggunakan orientasi Portrait A4 dengan margin rapat (15mm)
       doc = SimpleDocTemplate(
           pdf_buffer,
-          pagesize=landscape(A4),
-          rightMargin=20,
-          leftMargin=20,
-          topMargin=20,
-          bottomMargin=20,
+          pagesize=A4,
+          rightMargin=25,
+          leftMargin=25,
+          topMargin=30,
+          bottomMargin=30,
       )
 
       story = []
@@ -149,30 +152,30 @@ if uploaded_file is not None:
           'CardTitle',
           parent=styles['Normal'],
           fontName='Helvetica-Bold',
-          fontSize=12,
-          leading=14,
+          fontSize=11,
+          leading=13,
       )
       normal_style = ParagraphStyle(
           'CardNormal',
           parent=styles['Normal'],
           fontName='Helvetica',
-          fontSize=8,
-          leading=10,
+          fontSize=7.5,
+          leading=9,
       )
       center_style = ParagraphStyle(
           'CardCenter',
           parent=styles['Normal'],
           fontName='Helvetica',
-          fontSize=8,
-          leading=10,
+          fontSize=7.5,
+          leading=9,
           alignment=1,
       )
       header_cell_style = ParagraphStyle(
           'CardHeader',
           parent=styles['Normal'],
           fontName='Helvetica-Bold',
-          fontSize=8,
-          leading=10,
+          fontSize=7.5,
+          leading=9,
           alignment=1,
       )
 
@@ -185,7 +188,7 @@ if uploaded_file is not None:
         story.append(
             Paragraph("<b>Buku / Kartu Persediaan Manual</b>", title_style)
         )
-        story.append(Spacer(1, 4))
+        story.append(Spacer(1, 3))
         story.append(
             Paragraph(
                 f"<b>Nama Barang :</b> {item['nama_barang']}", normal_style
@@ -199,21 +202,21 @@ if uploaded_file is not None:
         story.append(
             Paragraph(f"<b>Satuan :</b> {item['satuan']}", normal_style)
         )
-        story.append(Spacer(1, 6))
+        story.append(Spacer(1, 5))
 
-        # Tabel 10 Kolom sesuai Format Manual
+        # Tabel 10 Kolom
         table_data = [
             [
                 Paragraph("<b>No</b>", header_cell_style),
                 Paragraph("<b>Tanggal</b>", header_cell_style),
                 Paragraph("<b>Keterangan</b>", header_cell_style),
-                Paragraph("<b>Jumlah Masuk</b>", header_cell_style),
-                Paragraph("<b>Harga Satuan</b>", header_cell_style),
-                Paragraph("<b>Jumlah Keluar</b>", header_cell_style),
-                Paragraph("<b>Harga Satuan</b>", header_cell_style),
+                Paragraph("<b>Jumlah<br/>Masuk</b>", header_cell_style),
+                Paragraph("<b>Harga<br/>Satuan</b>", header_cell_style),
+                Paragraph("<b>Jumlah<br/>Keluar</b>", header_cell_style),
+                Paragraph("<b>Harga<br/>Satuan</b>", header_cell_style),
                 Paragraph("<b>Saldo<br/>Jumlah</b>", header_cell_style),
-                Paragraph("<b>Saldo<br/>Nilai (Rp)</b>", header_cell_style),
-                Paragraph("<b>Kondisi Barang</b>", header_cell_style),
+                Paragraph("<b>Saldo Nilai<br/>(Rp)</b>", header_cell_style),
+                Paragraph("<b>Kondisi<br/>Barang</b>", header_cell_style),
             ],
             [
                 Paragraph("<b>(1)</b>", center_style),
@@ -223,13 +226,12 @@ if uploaded_file is not None:
                 Paragraph("<b>(5)</b>", center_style),
                 Paragraph("<b>(6)</b>", center_style),
                 Paragraph("<b>(7)</b>", center_style),
-                Paragraph("<b>(8) = (4)-(6)</b>", center_style),
-                Paragraph("<b>(9) = (8)x(5)</b>", center_style),
+                Paragraph("<b>(8)=(4)-(6)</b>", center_style),
+                Paragraph("<b>(9)=(8)x(5)</b>", center_style),
                 Paragraph("<b>(10)</b>", center_style),
             ],
         ]
 
-        # Masukkan baris transaksi dengan penomoran urut
         for i, r in enumerate(rows, start=1):
           table_data.append([
               Paragraph(str(i), center_style),
@@ -244,8 +246,8 @@ if uploaded_file is not None:
               Paragraph(str(r["Kondisi Barang"]), center_style),
           ])
 
-        # Lebar proporsional untuk 10 kolom di kertas landscape A4
-        col_widths = [25, 55, 175, 55, 65, 55, 65, 55, 75, 55]
+        # Lebar proporsional pas untuk kertas A4 Portrait (Total lebar ~545 pt)
+        col_widths = [20, 50, 140, 42, 52, 42, 52, 45, 62, 48]
         t = Table(table_data, colWidths=col_widths, repeatRows=2)
         t.setStyle(
             TableStyle([
@@ -253,24 +255,23 @@ if uploaded_file is not None:
                 ("ALIGN", (0, 0), (-1, -1), "CENTER"),
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                 ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
-                ("TOPPADDING", (0, 0), (-1, -1), 3),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                ("TOPPADDING", (0, 0), (-1, -1), 2.5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
             ])
         )
 
         story.append(t)
 
-        # Beri PageBreak (pindah halaman) untuk barang berikutnya
         if idx < len(all_inventory_data) - 1:
           story.append(PageBreak())
 
       doc.build(story)
       pdf_data = pdf_buffer.getvalue()
 
-      st.success("Berhasil membuat file PDF Kartu Persediaan!")
+      st.success("Berhasil! PDF Portrait siap diunduh.")
       st.download_button(
-          label="📥 Download File PDF Kartu Persediaan Siap Cetak",
+          label="📥 Download PDF Kartu Persediaan Portrait",
           data=pdf_data,
-          file_name="Kartu_Persediaan_Manual_Lengkap.pdf",
+          file_name="Kartu_Persediaan_Manual_Portrait.pdf",
           mime="application/pdf",
       )
