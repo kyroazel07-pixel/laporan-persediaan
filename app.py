@@ -5,69 +5,64 @@ import pdfplumber
 import streamlit as st
 
 st.set_page_config(
-    page_title="Konverter Kartu Persediaan BMN", layout="wide"
+    page_title="Konverter Kartu Persediaan Manual BMN", layout="wide"
 )
 
-st.title("📦 Konverter Buku / Kartu Persediaan Manual BMN (Multi-Halaman)")
+st.title("📦 Generator Kartu Persediaan Manual BMN (Sesuai Format Baku)")
 st.markdown(
-    "Unggah file PDF Rincian Buku Persediaan (mendukung ratusan halaman). Aplikasi"
-    " akan memisahkan tiap barang ke dalam Sheet Excel berbeda dengan format"
-    " manual."
+    "Unggah PDF Laporan Persediaan SAKTI/SIMAN (300+ halaman). Aplikasi akan"
+    " menggabungkan barang yang terpecah di banyak halaman, merunut nomor"
+    " urutnya, dan menyusun format sesuai kartu manual."
 )
 
 uploaded_file = st.file_uploader(
-    "Pilih file PDF Laporan Persediaan SAKTI/SIMAN", type=["pdf"]
+    "Pilih file PDF Laporan Persediaan", type=["pdf"]
 )
 
 
-def process_pdf_data(pdf_file):
-  all_items = []
-  current_item = None
+def extract_and_merge_inventory(pdf_file):
+  # Dictionary untuk menampung data berdasarkan Kode Barang
+  items_dict = {}
 
   with pdfplumber.open(pdf_file) as pdf:
     total_pages = len(pdf.pages)
     progress_bar = st.progress(0)
     status_text = st.empty()
 
+    current_kode = "UMUM"
+    current_nama = "Persediaan Umum"
+    current_satuan = "Buah"
+
     for idx, page in enumerate(pdf.pages):
       status_text.text(
-          f"Memproses halaman {idx + 1} dari {total_pages}..."
+          f"Menganalisis halaman {idx + 1} dari {total_pages}..."
       )
       progress_bar.progress((idx + 1) / total_pages)
 
       text = page.extract_text() or ""
 
-      # Deteksi apakah ada informasi barang baru di halaman ini
-      if "NAMA BARANG" in text or "KODE BARANG" in text:
-        if current_item and current_item["rows"]:
-          all_items.append(current_item)
+      # Deteksi metadata barang jika ada di halaman ini
+      m_nama = re.search(r"NAMA BARANG\s*:\s*(.*)", text)
+      m_kode = re.search(r"KODE BARANG\s*:\s*(.*)", text)
+      m_sat = re.search(r"SATUAN\s*:\s*(.*)", text)
 
-        m_nama = re.search(r"NAMA BARANG\s*:\s*(.*)", text)
-        m_kode = re.search(r"KODE BARANG\s*:\s*(.*)", text)
-        m_sat = re.search(r"SATUAN\s*:\s*(.*)", text)
+      if m_kode:
+        current_kode = m_kode.group(1).strip()
+      if m_nama:
+        current_nama = m_nama.group(1).strip()
+      if m_sat:
+        current_satuan = m_sat.group(1).strip()
 
-        nama_b = (
-            m_nama.group(1).strip() if m_nama else f"Barang_{idx + 1}"
-        )
-        kode_b = m_kode.group(1).strip() if m_kode else "-"
-        sat_b = m_sat.group(1).strip() if m_sat else "Buah"
-
-        current_item = {
-            "nama_barang": nama_b,
-            "kode_barang": kode_b,
-            "satuan": sat_b,
+      # Jika barang belum ada di kamus, buat wadahnya
+      if current_kode not in items_dict:
+        items_dict[current_kode] = {
+            "nama_barang": current_nama,
+            "kode_barang": current_kode,
+            "satuan": current_satuan,
             "rows": [],
         }
 
-      if not current_item:
-        current_item = {
-            "nama_barang": "Data Persediaan",
-            "kode_barang": "-",
-            "satuan": "-",
-            "rows": [],
-        }
-
-      # Ekstraksi tabel transaksi per halaman
+      # Ambil tabel transaksi di halaman ini
       tables = page.extract_tables()
       for table in tables:
         for row in table:
@@ -75,16 +70,16 @@ def process_pdf_data(pdf_file):
               cell.replace("\n", " ").strip() if cell else "" for cell in row
           ]
 
-          # Filter baris valid (pastikan memiliki minimal kolom transaksi)
+          # Pastikan baris memiliki kolom data transaksi yang valid
           if len(cleaned) >= 11:
-            no = cleaned[0]
+            no_raw = cleaned[0]
             tgl = cleaned[1]
             ket = cleaned[2]
             no_dok = cleaned[3] if len(cleaned) > 3 else ""
 
-            # Lewati baris header tabel yang ikut terambil
+            # Lewati baris header tabel yang berulang
             if (
-                "No" in no
+                "No" in no_raw
                 or "Tanggal" in tgl
                 or "Keterangan" in ket
                 or "Saldo" in ket
@@ -96,17 +91,14 @@ def process_pdf_data(pdf_file):
             else:
               ket_full = ket
 
-            # Ambil nilai Masuk, Keluar, dan Saldo sesuai standar layout SAKTI
             jml_masuk = cleaned[4] if len(cleaned) > 4 else "0"
             hrg_masuk = cleaned[5] if len(cleaned) > 5 else "0"
-
             jml_keluar = cleaned[7] if len(cleaned) > 7 else "0"
             hrg_keluar = cleaned[8] if len(cleaned) > 8 else "0"
-
             saldo_unit = cleaned[10] if len(cleaned) > 10 else "0"
             saldo_nilai = cleaned[11] if len(cleaned) > 11 else "0"
 
-            # Ambil harga satuan aktif
+            # Ambil harga satuan yang aktif
             harga_satuan = (
                 hrg_masuk
                 if hrg_masuk not in ["", "0", "0.00", "-"]
@@ -115,47 +107,71 @@ def process_pdf_data(pdf_file):
             if not harga_satuan or harga_satuan in ["", "-"]:
               harga_satuan = "0"
 
-            # Masukkan ke baris data terstruktur format manual
-            if no.isdigit() or "Saldo" in ket or "Pembelian" in ket or "Habis" in ket:
-              current_item["rows"].append({
-                  "No": no,
+            # Masukkan ke baris barang aktif
+            if (
+                no_raw.isdigit()
+                or "Saldo Awal" in ket
+                or "Pembelian" in ket
+                or "Habis" in ket
+            ):
+              items_dict[current_kode]["rows"].append({
                   "Tanggal": tgl,
                   "Keterangan": ket_full,
                   "Jumlah Masuk": jml_masuk,
-                  "Harga Satuan": harga_satuan,
+                  "Harga Satuan (Masuk)": harga_satuan,
                   "Jumlah Keluar": jml_keluar,
-                  "Harga Satuan Keluar": harga_satuan,
+                  "Harga Satuan (Keluar)": harga_satuan,
                   "Saldo Jumlah": saldo_unit,
                   "Saldo Nilai (Rp)": saldo_nilai,
                   "Kondisi Barang": "Baik (B)",
               })
 
-    if current_item and current_item["rows"]:
-      all_items.append(current_item)
-
     progress_bar.empty()
     status_text.empty()
 
-  return all_items
+  return list(items_dict.values())
 
 
 if uploaded_file is not None:
-  if st.button("🚀 Proses Dokumen Sekarang"):
+  if st.button("🚀 Proses dan Format Dokumen"):
     with st.spinner(
-        "Sedang membedah dokumen dan memisahkan data per barang..."
+        "Sedang menggabungkan halaman terpecah dan merunut perhitungan..."
     ):
-      items = process_pdf_data(uploaded_file)
+      all_inventory_data = extract_and_merge_inventory(uploaded_file)
 
       st.success(
-          f"Berhasil! Ditemukan {len(items)} jenis barang dari file PDF Anda."
+          f"Berhasil merunut data! Ditemukan {len(all_inventory_data)} jenis"
+          " barang."
       )
 
-      # Buat file Excel dengan multi-sheet per barang
+      # Buat file Excel dengan format rapi dan penomoran berurutan
       output = io.BytesIO()
       with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        for item in items:
-          df = pd.DataFrame(item["rows"])
-          # Bersihkan karakter nama sheet yang dilarang Excel
+        for item in all_inventory_data:
+          rows = item["rows"]
+          if not rows:
+            continue
+
+          # Berikan nomor urut yang dirunut ulang dari 1 secara otomatis
+          for i, r in enumerate(rows, start=1):
+            r["No"] = i
+
+          # Susun urutan kolom persis seperti format manual
+          df = pd.DataFrame(rows)
+          df = df[[
+              "No",
+              "Tanggal",
+              "Keterangan",
+              "Jumlah Masuk",
+              "Harga Satuan (Masuk)",
+              "Jumlah Keluar",
+              "Harga Satuan (Keluar)",
+              "Saldo Jumlah",
+              "Saldo Nilai (Rp)",
+              "Kondisi Barang",
+          ]]
+
+          # Buat nama sheet aman (maksimal 28 karakter)
           safe_title = (
               re.sub(r'[\\/*?:"<>|]', "", item["nama_barang"])[:28]
               .strip()
@@ -163,14 +179,32 @@ if uploaded_file is not None:
           )
           if not safe_title:
             safe_title = "BARANG"
-          df.to_excel(writer, index=False, sheet_name=safe_title)
+
+          # Tulis header informasi barang di atas tabel Excel
+          header_info = pd.DataFrame([
+              ["Buku / Kartu Persediaan Manual", "", "", "", "", "", "", "", "", ""],
+              [f"Nama Barang : {item['nama_barang']}", "", "", "", "", "", "", "", "", ""],
+              [f"Kode Barang : {item['kode_barang']}", "", "", "", "", "", "", "", "", ""],
+              [f"Satuan : {item['satuan']}", "", "", "", "", "", "", "", "", ""],
+              ["", "", "", "", "", "", "", "", "", ""],
+          ])
+          header_info.to_excel(
+              writer,
+              sheet_name=safe_title,
+              index=False,
+              header=False,
+              startrow=0,
+          )
+
+          # Tulis data tabel transaksi di bawah header
+          df.to_excel(writer, sheet_name=safe_title, index=False, startrow=5)
 
       excel_data = output.getvalue()
 
       st.download_button(
-          label="📥 Download Hasil Excel (Format Kartu Manual Terpisah Per Sheet)",
+          label="📥 Download Excel (Format Kartu Manual Sesuai Gambar)",
           data=excel_data,
-          file_name="Kartu_Persediaan_Manual_Lengkap.xlsx",
+          file_name="Kartu_Persediaan_Manual_Terformat.xlsx",
           mime=(
               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
           ),
