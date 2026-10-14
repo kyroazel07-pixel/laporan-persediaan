@@ -9,11 +9,11 @@ from reportlab.lib import colors
 
 st.set_page_config(page_title="Konverter Kartu Persediaan SAKTI", layout="wide")
 
-st.title("📄 Generator PDF Kartu Persediaan Manual (Final & Bersih)")
+st.title("📄 Generator PDF Kartu Persediaan Manual (Sangat Rapi & Sejajar)")
 st.markdown(
-    "Pembaruan: Multi-layer saldo otomatis tersusun ke bawah secara vertikal,"
-    " serta barang dengan saldo awal 0 tanpa transaksi otomatis disingkirkan"
-    " agar hemat halaman."
+    "Pembaruan total: Ukuran font disesuaikan agar tidak ada teks yang turun ke"
+    " bawah (seperti No atau Kondisi Barang), dan multi-layer saldo tersusun"
+    " lurus vertikal dengan rapi."
 )
 
 uploaded_file = st.file_uploader("Pilih file PDF Laporan Persediaan", type=["pdf"])
@@ -22,13 +22,10 @@ uploaded_file = st.file_uploader("Pilih file PDF Laporan Persediaan", type=["pdf
 def clean_stacked_text(text):
   if not text:
     return ""
-  # Membersihkan spasi berlebih dan merapikan angka berlapis agar tersusun ke bawah
+  # Memisahkan angka-angka multi-layer agar tersusun rapi ke bawah dengan <br/>
   cleaned = re.sub(r"\s+", " ", str(text)).strip()
-  # Jika ada pola angka yang gandeng (contoh: 31,200 56,875 atau 3 5 3), pisahkan dengan baris baru
-  # Kita deteksi pola angka/koma/titik yang dipisahkan spasi di tengah baris
   parts = cleaned.split(" ")
   if len(parts) > 1:
-    # Cek apakah ini deretan angka multi-layer
     return "<br/>".join(parts)
   return cleaned
 
@@ -131,18 +128,17 @@ def extract_sakti_inventory(pdf_file):
     progress_bar.empty()
     status_text.empty()
 
-  # Filter cerdas: Hapus barang yang hanya punya 1 baris (Saldo Awal) dengan nilai unit '0' dan tidak ada transaksi lain
+  # Filter cerdas: Hapus barang dengan saldo awal 0 tanpa transaksi lanjutan
   filtered_items = []
   for item in list(items_dict.values()):
     rows = item["rows"]
     if len(rows) == 1:
-      # Cek apakah baris tersebut adalah Saldo Awal dengan nilai 0
       first_row = rows[0]
       if (
           "Saldo Awal" in first_row["Keterangan"]
           and first_row["Saldo Unit"].replace("<br/>", "").strip() == "0"
       ):
-        continue  # Lewati / buang barang ini
+        continue
     if rows:
       filtered_items.append(item)
 
@@ -150,18 +146,19 @@ def extract_sakti_inventory(pdf_file):
 
 
 if uploaded_file is not None:
-  if st.button("🚀 Generate PDF Final (Clean & Stacked)"):
-    with st.spinner("Memproses dan menyaring dokumen..."):
+  if st.button("🚀 Generate PDF Sangat Rapi"):
+    with st.spinner("Memproses dokumen..."):
       all_inventory_data = extract_sakti_inventory(uploaded_file)
 
       pdf_buffer = io.BytesIO()
+      # Margin kiri-kanan disesuaikan tipis agar area cetak maksimal
       doc = SimpleDocTemplate(
           pdf_buffer,
           pagesize=A4,
-          rightMargin=20,
-          leftMargin=20,
-          topMargin=25,
-          bottomMargin=25,
+          rightMargin=15,
+          leftMargin=15,
+          topMargin=20,
+          bottomMargin=20,
       )
 
       story = []
@@ -171,30 +168,39 @@ if uploaded_file is not None:
           'CardTitle',
           parent=styles['Normal'],
           fontName='Helvetica-Bold',
-          fontSize=11,
-          leading=13,
+          fontSize=10,
+          leading=12,
       )
       normal_style = ParagraphStyle(
           'CardNormal',
           parent=styles['Normal'],
           fontName='Helvetica',
-          fontSize=7,
-          leading=8.5,
+          fontSize=8,
+          leading=10,
       )
-      center_style = ParagraphStyle(
-          'CardCenter',
+      # Font diperkecil pas (5.8 pt) agar kata seperti 'Kondisi Barang' dan '(No)' tidak turun
+      table_cell_style = ParagraphStyle(
+          'TableCell',
           parent=styles['Normal'],
           fontName='Helvetica',
-          fontSize=7,
-          leading=8.5,
+          fontSize=5.8,
+          leading=7.5,
           alignment=1,
       )
-      header_cell_style = ParagraphStyle(
-          'CardHeader',
+      table_desc_style = ParagraphStyle(
+          'TableDesc',
+          parent=styles['Normal'],
+          fontName='Helvetica',
+          fontSize=5.8,
+          leading=7.5,
+          alignment=0,
+      )
+      table_header_style = ParagraphStyle(
+          'TableHeader',
           parent=styles['Normal'],
           fontName='Helvetica-Bold',
-          fontSize=7,
-          leading=8.5,
+          fontSize=5.8,
+          leading=7.5,
           alignment=1,
       )
 
@@ -207,7 +213,7 @@ if uploaded_file is not None:
         story.append(
             Paragraph("<b>Buku / Kartu Persediaan Manual</b>", title_style)
         )
-        story.append(Spacer(1, 3))
+        story.append(Spacer(1, 2))
         story.append(
             Paragraph(
                 f"<b>Nama Barang :</b> {item['nama_barang']}", normal_style
@@ -221,51 +227,52 @@ if uploaded_file is not None:
         story.append(
             Paragraph(f"<b>Satuan :</b> {item['satuan']}", normal_style)
         )
-        story.append(Spacer(1, 5))
+        story.append(Spacer(1, 4))
 
         # Tabel 10 Kolom Format Manual
         table_data = [
             [
-                Paragraph("<b>No</b>", header_cell_style),
-                Paragraph("<b>Tanggal</b>", header_cell_style),
-                Paragraph("<b>Keterangan</b>", header_cell_style),
-                Paragraph("<b>Jumlah Masuk</b>", header_cell_style),
-                Paragraph("<b>Harga Satuan</b>", header_cell_style),
-                Paragraph("<b>Jumlah Keluar</b>", header_cell_style),
-                Paragraph("<b>Harga Satuan</b>", header_cell_style),
-                Paragraph("<b>Saldo Jumlah</b>", header_cell_style),
-                Paragraph("<b>Saldo Nilai (Rp)</b>", header_cell_style),
-                Paragraph("<b>Kondisi Barang</b>", header_cell_style),
+                Paragraph("<b>No</b>", table_header_style),
+                Paragraph("<b>Tanggal</b>", table_header_style),
+                Paragraph("<b>Keterangan</b>", table_header_style),
+                Paragraph("<b>Jumlah Masuk</b>", table_header_style),
+                Paragraph("<b>Harga Satuan</b>", table_header_style),
+                Paragraph("<b>Jumlah Keluar</b>", table_header_style),
+                Paragraph("<b>Harga Satuan</b>", table_header_style),
+                Paragraph("<b>Saldo Jumlah</b>", table_header_style),
+                Paragraph("<b>Saldo Nilai (Rp)</b>", table_header_style),
+                Paragraph("<b>Kondisi Barang</b>", table_header_style),
             ],
             [
-                Paragraph("<b>(1)</b>", center_style),
-                Paragraph("<b>(2)</b>", center_style),
-                Paragraph("<b>(3)</b>", center_style),
-                Paragraph("<b>(4)</b>", center_style),
-                Paragraph("<b>(5)</b>", center_style),
-                Paragraph("<b>(6)</b>", center_style),
-                Paragraph("<b>(7)</b>", center_style),
-                Paragraph("<b>(8)=(4)-(6)</b>", center_style),
-                Paragraph("<b>(9)=(8)x(5)</b>", center_style),
-                Paragraph("<b>(10)</b>", center_style),
+                Paragraph("<b>(1)</b>", table_header_style),
+                Paragraph("<b>(2)</b>", table_header_style),
+                Paragraph("<b>(3)</b>", table_header_style),
+                Paragraph("<b>(4)</b>", table_header_style),
+                Paragraph("<b>(5)</b>", table_header_style),
+                Paragraph("<b>(6)</b>", table_header_style),
+                Paragraph("<b>(7)</b>", table_header_style),
+                Paragraph("<b>(8)=(4)-(6)</b>", table_header_style),
+                Paragraph("<b>(9)=(8)x(5)</b>", table_header_style),
+                Paragraph("<b>(10)</b>", table_header_style),
             ],
         ]
 
         for r in rows:
           table_data.append([
-              Paragraph(str(r["No"]), center_style),
-              Paragraph(str(r["Tanggal"]), center_style),
-              Paragraph(str(r["Keterangan"]), normal_style),
-              Paragraph(str(r["Jumlah Masuk"]), center_style),
-              Paragraph(str(r["Harga Masuk"]), center_style),
-              Paragraph(str(r["Jumlah Keluar"]), center_style),
-              Paragraph(str(r["Harga Keluar"]), center_style),
-              Paragraph(str(r["Saldo Unit"]), center_style),
-              Paragraph(str(r["Saldo Nilai"]), center_style),
-              Paragraph(str(r["Kondisi Barang"]), center_style),
+              Paragraph(str(r["No"]), table_cell_style),
+              Paragraph(str(r["Tanggal"]), table_cell_style),
+              Paragraph(str(r["Keterangan"]), table_desc_style),
+              Paragraph(str(r["Jumlah Masuk"]), table_cell_style),
+              Paragraph(str(r["Harga Masuk"]), table_cell_style),
+              Paragraph(str(r["Jumlah Keluar"]), table_cell_style),
+              Paragraph(str(r["Harga Keluar"]), table_cell_style),
+              Paragraph(str(r["Saldo Unit"]), table_cell_style),
+              Paragraph(str(r["Saldo Nilai"]), table_cell_style),
+              Paragraph(str(r["Kondisi Barang"]), table_cell_style),
           ])
 
-        col_widths = [22, 52, 135, 45, 55, 45, 55, 45, 65, 37]
+        # Lebar kolom disesuaikan proporsional pas di A4 Portrait (~565 pt total) tanpa terpotong
+        col_widths = [20, 48, 145, 45, 58, 45, 58, 48, 62, 36]
         t = Table(table_data, colWidths=col_widths, repeatRows=2)
         t.setStyle(
             TableStyle([
@@ -273,8 +280,8 @@ if uploaded_file is not None:
                 ("ALIGN", (0, 0), (-1, -1), "CENTER"),
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                 ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
-                ("TOPPADDING", (0, 0), (-1, -1), 2.5),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
+                ("TOPPADDING", (0, 0), (-1, -1), 2),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
             ])
         )
 
@@ -288,8 +295,8 @@ if uploaded_file is not None:
 
       st.success("Berhasil! PDF Sempurna siap diunduh.")
       st.download_button(
-          label="📥 Download PDF Kartu Persediaan Final",
+          label="📥 Download PDF Kartu Persediaan Sangat Rapi",
           data=pdf_data,
-          file_name="Kartu_Persediaan_Manual_Final_Bersih.pdf",
+          file_name="Kartu_Persediaan_Manual_Sangat_Rapi.pdf",
           mime="application/pdf",
       )
