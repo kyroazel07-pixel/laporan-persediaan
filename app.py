@@ -9,11 +9,10 @@ from reportlab.lib import colors
 
 st.set_page_config(page_title="Konverter Kartu Persediaan SAKTI", layout="wide")
 
-st.title("📄 Generator PDF Kartu Persediaan Manual (Sangat Rapi & Sejajar)")
+st.title("📄 Generator PDF Kartu Persediaan Manual (Rapi & Sejajar)")
 st.markdown(
-    "Pembaruan total: Ukuran font disesuaikan agar tidak ada teks yang turun ke"
-    " bawah (seperti No atau Kondisi Barang), dan multi-layer saldo tersusun"
-    " lurus vertikal dengan rapi."
+    "Pembaruan: Bagian Nama, Kode, dan Satuan Barang kini disejajarkan"
+    " menggunakan tabel tersembunyi agar titik duanya rapi dan cantik."
 )
 
 uploaded_file = st.file_uploader("Pilih file PDF Laporan Persediaan", type=["pdf"])
@@ -22,7 +21,6 @@ uploaded_file = st.file_uploader("Pilih file PDF Laporan Persediaan", type=["pdf
 def clean_stacked_text(text):
   if not text:
     return ""
-  # Memisahkan angka-angka multi-layer agar tersusun rapi ke bawah dengan <br/>
   cleaned = re.sub(r"\s+", " ", str(text)).strip()
   parts = cleaned.split(" ")
   if len(parts) > 1:
@@ -146,12 +144,11 @@ def extract_sakti_inventory(pdf_file):
 
 
 if uploaded_file is not None:
-  if st.button("🚀 Generate PDF Sangat Rapi"):
+  if st.button("🚀 Generate PDF Super Rapi & Cantik"):
     with st.spinner("Memproses dokumen..."):
       all_inventory_data = extract_sakti_inventory(uploaded_file)
 
       pdf_buffer = io.BytesIO()
-      # Margin kiri-kanan disesuaikan tipis agar area cetak maksimal
       doc = SimpleDocTemplate(
           pdf_buffer,
           pagesize=A4,
@@ -171,14 +168,21 @@ if uploaded_file is not None:
           fontSize=10,
           leading=12,
       )
-      normal_style = ParagraphStyle(
-          'CardNormal',
+      meta_label_style = ParagraphStyle(
+          'MetaLabel',
+          parent=styles['Normal'],
+          fontName='Helvetica-Bold',
+          fontSize=8,
+          leading=10,
+      )
+      meta_val_style = ParagraphStyle(
+          'MetaVal',
           parent=styles['Normal'],
           fontName='Helvetica',
           fontSize=8,
           leading=10,
       )
-      # Font diperkecil pas (5.8 pt) agar kata seperti 'Kondisi Barang' dan '(No)' tidak turun
+
       table_cell_style = ParagraphStyle(
           'TableCell',
           parent=styles['Normal'],
@@ -209,27 +213,45 @@ if uploaded_file is not None:
         if not rows:
           continue
 
-        # Header Identitas Barang
+        # Judul Kartu
         story.append(
             Paragraph("<b>Buku / Kartu Persediaan Manual</b>", title_style)
         )
-        story.append(Spacer(1, 2))
-        story.append(
-            Paragraph(
-                f"<b>Nama Barang :</b> {item['nama_barang']}", normal_style
-            )
-        )
-        story.append(
-            Paragraph(
-                f"<b>Kode Barang :</b> {item['kode_barang']}", normal_style
-            )
-        )
-        story.append(
-            Paragraph(f"<b>Satuan :</b> {item['satuan']}", normal_style)
-        )
-        story.append(Spacer(1, 4))
+        story.append(Spacer(1, 3))
 
-        # Tabel 10 Kolom Format Manual
+        # Tabel Identitas Barang (Agar titik dua lurus sejajar sempurna)
+        meta_data = [
+            [
+                Paragraph("Nama Barang", meta_label_style),
+                Paragraph(":", meta_label_style),
+                Paragraph(item["nama_barang"], meta_val_style),
+            ],
+            [
+                Paragraph("Kode Barang", meta_label_style),
+                Paragraph(":", meta_label_style),
+                Paragraph(item["kode_barang"], meta_val_style),
+            ],
+            [
+                Paragraph("Satuan", meta_label_style),
+                Paragraph(":", meta_label_style),
+                Paragraph(item["satuan"], meta_val_style),
+            ],
+        ]
+        meta_table = Table(meta_data, colWidths=[70, 10, 450])
+        meta_table.setStyle(
+            TableStyle([
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("TOPPADDING", (0, 0), (-1, -1), 1),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ])
+        )
+
+        story.append(meta_table)
+        story.append(Spacer(1, 6))
+
+        # Tabel Transaksi 10 Kolom
         table_data = [
             [
                 Paragraph("<b>No</b>", table_header_style),
@@ -271,8 +293,7 @@ if uploaded_file is not None:
               Paragraph(str(r["Kondisi Barang"]), table_cell_style),
           ])
 
-        # Lebar kolom disesuaikan proporsional pas di A4 Portrait (~565 pt total) tanpa terpotong
-        col_widths = [20, 48, 145, 45, 58, 45, 58, 48, 62, 36]
+        col_widths = [20, 48, 145, 45, 58, 45, 58, 48, 62, 39]
         t = Table(table_data, colWidths=col_widths, repeatRows=2)
         t.setStyle(
             TableStyle([
@@ -293,10 +314,10 @@ if uploaded_file is not None:
       doc.build(story)
       pdf_data = pdf_buffer.getvalue()
 
-      st.success("Berhasil! PDF Sempurna siap diunduh.")
+      st.success("Berhasil! PDF Super Rapi & Cantik siap diunduh.")
       st.download_button(
-          label="📥 Download PDF Kartu Persediaan Sangat Rapi",
+          label="📥 Download PDF Kartu Persediaan Cantik",
           data=pdf_data,
-          file_name="Kartu_Persediaan_Manual_Sangat_Rapi.pdf",
+          file_name="Kartu_Persediaan_Manual_Cantik.pdf",
           mime="application/pdf",
       )
