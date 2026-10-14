@@ -9,10 +9,10 @@ from reportlab.lib import colors
 
 st.set_page_config(page_title="Konverter Kartu Persediaan SAKTI", layout="wide")
 
-st.title("📄 Generator PDF Kartu Persediaan Manual (Murni Sesuai SAKTI)")
+st.title("📄 Generator PDF Kartu Persediaan Manual (Sempurna & Utuh)")
 st.markdown(
-    "Aplikasi menyalin data transaksi per barang secara murni dan presisi"
-    " tanpa mengubah atau menebak-nebak angka."
+    "Pembaruan: Memperbaiki pembacaan baris lanjutan transaksi agar seluruh"
+    " rincian angka dan keterangan tersalin lengkap tanpa ada yang kosong."
 )
 
 uploaded_file = st.file_uploader("Pilih file PDF Laporan Persediaan", type=["pdf"])
@@ -21,7 +21,6 @@ uploaded_file = st.file_uploader("Pilih file PDF Laporan Persediaan", type=["pdf
 def clean_stacked_text(text):
   if not text:
     return ""
-  # Merapikan angka multi-layer agar tersusun ke bawah secara vertikal
   cleaned = re.sub(r"\s+", " ", str(text)).strip()
   parts = cleaned.split(" ")
   if len(parts) > 1:
@@ -69,13 +68,16 @@ def extract_sakti_inventory(pdf_file):
         }
 
       tables = page.extract_tables()
+      last_no = ""
+      last_tgl = ""
+      last_ket = ""
+
       for table in tables:
         for row in table:
           cleaned = [
               cell.replace("\n", " ").strip() if cell else "" for cell in row
           ]
 
-          # Pastikan baris memiliki kolom yang cukup sesuai struktur SAKTI
           if len(cleaned) >= 11:
             no_raw = cleaned[0]
             tgl = cleaned[1]
@@ -91,21 +93,27 @@ def extract_sakti_inventory(pdf_file):
             ):
               continue
 
-            if no_dok and no_dok.lower() not in ["", "no dok", "-"]:
-              ket_full = f"{ket} (No. Dok: {no_dok})"
-            else:
-              ket_full = ket
+            # Jika baris ini memiliki nomor atau keterangan baru, simpan sebagai acuan
+            if no_raw.isdigit():
+              last_no = no_raw
+            if tgl:
+              last_tgl = tgl
+            if ket and "Saldo Awal" in ket or "Habis" in ket or "Pembelian" in ket or "Reklasifikasi" in ket:
+              if no_dok and no_dok.lower() not in ["", "no dok", "-"]:
+                last_ket = f"{ket} (No. Dok: {no_dok})"
+              else:
+                last_ket = ket
 
-            # Ambil persis sesuai indeks asli SAKTI
-            # Masuk
+            # Jika baris kosong nomornya tapi ada data angka di sebelah kanan (lanjutan rincian harga), gunakan nomor sebelumnya
+            active_no = no_raw if no_raw.isdigit() else last_no
+            active_tgl = tgl if tgl else last_tgl
+            active_ket = last_ket if last_ket else ket
+
+            # Ambil data angka SAKTI secara persis
             m_unit = cleaned[4] if len(cleaned) > 4 else "0"
             m_harga = cleaned[5] if len(cleaned) > 5 else "0"
-
-            # Keluar
             k_unit = cleaned[7] if len(cleaned) > 7 else "0"
             k_harga = cleaned[8] if len(cleaned) > 8 else "0"
-
-            # Saldo Persediaan (Unit dan Nilai Rupiah Total)
             s_unit = cleaned[10] if len(cleaned) > 10 else "0"
             s_nilai = (
                 cleaned[12]
@@ -113,24 +121,18 @@ def extract_sakti_inventory(pdf_file):
                 else (cleaned[11] if len(cleaned) > 11 else "0")
             )
 
-            # Tangkap semua baris transaksi yang valid
-            if (
-                no_raw.isdigit()
-                or "Saldo Awal" in ket
-                or "Pembelian" in ket
-                or "Habis" in ket
-                or "Reklasifikasi" in ket
-            ):
+            # Masukkan ke baris jika memiliki data angka/saldo yang valid
+            if active_no or "Saldo Awal" in active_ket or s_unit != "0":
               items_dict[current_kode]["rows"].append({
-                  "No": no_raw if no_raw else "",
-                  "Tanggal": tgl,
-                  "Keterangan": ket_full,
-                  "Jumlah Masuk": clean_stacked_text(m_unit),
-                  "Harga Masuk": clean_stacked_text(m_harga),
-                  "Jumlah Keluar": clean_stacked_text(k_unit),
-                  "Harga Keluar": clean_stacked_text(k_harga),
-                  "Saldo Unit": clean_stacked_text(s_unit),
-                  "Saldo Nilai": clean_stacked_text(s_nilai),
+                  "No": active_no,
+                  "Tanggal": active_tgl,
+                  "Keterangan": active_ket,
+                  "Jumlah Masuk": m_unit,
+                  "Harga Masuk": m_harga,
+                  "Jumlah Keluar": k_unit,
+                  "Harga Keluar": k_harga,
+                  "Saldo Unit": s_unit,
+                  "Saldo Nilai": s_nilai,
                   "Kondisi Barang": "Baik (B)",
               })
 
@@ -145,7 +147,7 @@ def extract_sakti_inventory(pdf_file):
       first_row = rows[0]
       if (
           "Saldo Awal" in first_row["Keterangan"]
-          and first_row["Saldo Unit"].replace("<br/>", "").strip() == "0"
+          and first_row["Saldo Unit"].strip() == "0"
       ):
         continue
     if rows:
@@ -155,7 +157,7 @@ def extract_sakti_inventory(pdf_file):
 
 
 if uploaded_file is not None:
-  if st.button("🚀 Generate PDF Murni Sesuai SAKTI"):
+  if st.button("🚀 Generate PDF Sempurna (Utuh Tanpa Terlewat)"):
     with st.spinner("Memproses dokumen..."):
       all_inventory_data = extract_sakti_inventory(uploaded_file)
 
@@ -225,13 +227,11 @@ if uploaded_file is not None:
         if not rows:
           continue
 
-        # Judul di Tengah
         story.append(
             Paragraph("<b>Buku / Kartu Persediaan Manual</b>", title_style)
         )
         story.append(Spacer(1, 6))
 
-        # Tabel Identitas Barang Sejajar
         meta_data = [
             [
                 Paragraph("Nama Barang", meta_label_style),
@@ -263,7 +263,6 @@ if uploaded_file is not None:
         story.append(meta_table)
         story.append(Spacer(1, 6))
 
-        # Tabel Transaksi 10 Kolom
         table_data = [
             [
                 Paragraph("<b>No</b>", table_header_style),
@@ -326,10 +325,10 @@ if uploaded_file is not None:
       doc.build(story)
       pdf_data = pdf_buffer.getvalue()
 
-      st.success("Berhasil! PDF murni sesuai SAKTI siap diunduh.")
+      st.success("Berhasil! PDF Sempurna siap diunduh.")
       st.download_button(
-          label="📥 Download PDF Kartu Persediaan Murni",
+          label="📥 Download PDF Kartu Persediaan Sempurna",
           data=pdf_data,
-          file_name="Kartu_Persediaan_Manual_Murni.pdf",
+          file_name="Kartu_Persediaan_Manual_Sempurna.pdf",
           mime="application/pdf",
       )
